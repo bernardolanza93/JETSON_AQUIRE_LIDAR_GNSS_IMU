@@ -14,18 +14,14 @@ print(PRINT_IMU_RAW)
 def inizialize_IMU():
     print("inizializing imu ")
 
-
-
     # Carica le librerie Xsens
     libxsensdeviceapi = ctypes.CDLL(find_library('xsensdeviceapi'))
     libxstypes = ctypes.CDLL(find_library('xstypes'))
 
-    # Esempio di utilizzo delle funzioni delle librerie Xsens
+    # Inizializza le librerie
     def main():
-        # Inizializza le librerie
-        libxstypes.xsensVersion()
-
-        # Altre operazioni con le librerie Xsens...
+        version = libxstypes.xsensGetLibraryVersion()
+        print(f"Xsens Library Version: {version}")
 
     if __name__ == "__main__":
         main()
