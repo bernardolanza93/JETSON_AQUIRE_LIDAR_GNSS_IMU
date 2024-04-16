@@ -1,6 +1,19 @@
 import configuration_handle as CONFIG
 import ctypes
 from ctypes.util import find_library
+import sys
+import os #for ubuntu only
+import time
+from collections import deque
+from threading import Lock
+
+
+#---------Ubuntu may need to set up the pacakge location for XDA and keyboard-----#
+module_path = "/home/usuario/.local/lib/python3.8/site-packages/"
+sys.path.insert(0, module_path)
+import xsensdeviceapi.xsensdeviceapi_py38_64 as xda
+#---------------------------------------------------------------------------------#
+
 
 
 
@@ -27,4 +40,4 @@ def inizialize_IMU():
         main()
 
 
-inizialize_IMU()
+#inizialize_IMU()

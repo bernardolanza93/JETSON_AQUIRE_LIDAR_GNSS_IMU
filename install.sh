@@ -35,4 +35,7 @@ echo "link libraries:"
 ech "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/xsens/lib"
 
 
+pip install keyboard
+
+
 
