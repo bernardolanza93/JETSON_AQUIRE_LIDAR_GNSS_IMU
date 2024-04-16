@@ -23,4 +23,4 @@ echo  "UPDATED SUCCESFULLY"
 echo "STARTING jetson SYSTEM "
 
 
-python3 main.py
+python3 app/main.py
