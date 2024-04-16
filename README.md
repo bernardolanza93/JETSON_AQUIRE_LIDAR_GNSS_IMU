@@ -1,3 +1,22 @@
+## INSTALLATION PROCEDURE
+run this file
+```
+install.sh
+```
+
+
+
+# IMU
+## Description Environment
+setting the environment for sensors
+we have installed an external ssd EVO of 1 Tb to save data, it is also linked to download folder, The documents folder inide it is where you want to put the code. 
+The libraries will be installed as usually in the parent directory of the operating system
+We are using a specific IMU with dev board
+to see the specific of IMU MTi 610 go there
+```
+https://mtidocs.movella.com/development-board
+```
+
 # LIDAR 
 
 description
