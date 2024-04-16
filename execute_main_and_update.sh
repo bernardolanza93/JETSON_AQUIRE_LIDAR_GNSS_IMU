@@ -6,6 +6,7 @@ cd  1TBSSD/Documentos/JETSON_AQUIRE_LIDAR_GNSS_IMU/
 
 
 
+
 echo "CHECKK INTERNET CONNECTION... "
 wget -q --spider http://google.com
 
