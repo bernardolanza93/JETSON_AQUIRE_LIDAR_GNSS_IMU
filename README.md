@@ -16,6 +16,11 @@ to see the specific of IMU MTi 610 go there
 ```
 https://mtidocs.movella.com/development-board
 ```
+Download MTi SDK from here:
+```
+https://www.movella.com/support/software-documentation
+```
+
 
 # LIDAR 
 
