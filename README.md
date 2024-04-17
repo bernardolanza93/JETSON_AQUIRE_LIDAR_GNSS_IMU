@@ -7,6 +7,12 @@ install.sh
 
 
 # IMU
+
+## Documentation
+
+You can find documentation here :
+MTSDK INSTALL DIR/doc/xsensdeviceapi/doc/html/index.html
+
 ## Description Environment
 setting the environment for sensors
 we have installed an external ssd EVO of 1 Tb to save data, it is also linked to download folder, The documents folder inide it is where you want to put the code. 
@@ -20,8 +26,58 @@ Download MTi SDK from here:
 ```
 https://www.movella.com/support/software-documentation
 ```
+## Important:
+Run XDA examples in c++ to test the xsens IMU
+Regular XDA cannot be compiled using ARM processors. 
+Users of ARM platforms (e.g. NVIDIA Jetson) can use the open source XDA examples instead.
+
+## Installing
+Download last stable version from here:
+```
+https://www.movella.com/support/software-documentation"
+```
+unpack it:
+```
+tar -xzf MT_Software_Suite...
+```
+also dependencies that is needed
+```
+pip install keyboard
+```
+
+then install the .sh file
+```
+sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
+```
+
+if you have this error install...
+```
+udecode could not be found' sharutils
+```
+
+```
+sudo apt update
+```
+```
+sudo apt install sharutils
+```
 
 
+link libraries:
+```
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/xsens/lib
+```
+
+## Getting started
+
+Make sure that you have Xsens MT SDK installed on your system. Before you start using the public XDA, we recommend taking a look at the 'Public XDA Examples', available in the Examples folder from installed MTSDK directory. So you will have some idea how to use it in your application.
+All information about how to compile and link a program can be found in either the Visual Studio Solution file or the Makefiles, located in 'src_cpp' example folder. Or you can simply copy xspublic folder, which contains Makefiles, from MTDSK directory to your application directory and start developing.
+
+To compile exapmples: 
+```
+sudo make
+```
+Then you have to move the examples / (or the entire folder) because in the usr folder is not possible generate log files due to the restricted permession of this area of the PC.
 # LIDAR 
 
 description
