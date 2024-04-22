@@ -1,5 +1,5 @@
-import configparser
 import os
+import configparser
 
 # Percorso del file di configurazione relativo al file del codice
 config_file_path = os.path.join(os.path.dirname(__file__), '..', 'configuration', 'config_localization.ini')
@@ -12,8 +12,8 @@ default_config = {
         'print_raw': 1,
         'key2': 'value2'
     },
-    'Section2': {
-        'key3': 'value3',
+    'GNSS': {
+        'track_file' : 'username\datafolder',
         'key4': 'value4'
     }
 }

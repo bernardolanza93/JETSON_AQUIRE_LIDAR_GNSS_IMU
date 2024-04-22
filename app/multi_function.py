@@ -14,6 +14,10 @@ timestamp = 0
 # Coda condivisa
 coda = []
 
+
+
+
+
 def thread_produttore():
     global stato, timestamp, coda
     stato_interno = 0
