@@ -78,7 +78,41 @@ To compile exapmples:
 sudo make
 ```
 Then you have to move the examples / (or the entire folder) because in the usr folder is not possible generate log files due to the restricted permession of this area of the PC.
+
+
+# GNSS ARDUSIMPLE RTK
+
+## Preparation of Configuration:
+Download the correct configuration in .txt format from the website indicated by Giorgi.
+```
+https://www.ardusimple.com/configuration-files/
+```
+The ARDUSIMPLE Bluetooth configuration with firmware version 1.32 is the one of our interest.
+Load the configuration after connecting and activating the Ardusimple to the computer via the interface.
+## Connection Verification:
+Ensure all cables are correctly connected.
+Make sure the Ardusimple is connected to the computer.
+Before configuring the hotspot, connect the computer to the Wi-Fi network created by the board, which will be named "ESP XBEE".
+This connection is necessary to access the IP address 192.168.4.1.
+## Access to Web Interface:
+Access the specific IP address 192.168.4.1 through the Chrome browser.
+Configure your phone's hotspot to provide the web page with the Wi-Fi credentials of the mobile phone (network name and password).
+Press the 'Enter' key in the center of the page.
+## Board Status and LED Indication:
+After connection, the board will be ready to receive data.
+The LEDs on the ESP32 socket will display signals:
+Flashing blue LEDs indicate activity.
+The red LED indicates an internet connection.
+The green LED lights up when the GNSS antenna sees the LLeida antenna, improving signal accuracy.
+## Board Acquisition via Python:
+The board is acquired through a serial connection.
+Connect the board to the computer via USB.
+Identify the name of the serial port, which is often "dev/tty".
+In the Python code, there is a loop that checks which material is transmitting and on which port to listen.
+
 # LIDAR 
+
+#
 
 description
 
