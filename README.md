@@ -54,6 +54,11 @@ sudo apt install sharutils
 sudo apt-get install libusb-1.0-0-dev
 ```
 
+The MTi USB dongle allows users to connect the robust MTi 600-series (such as the MTi-680G) to a USB port. Support for this accessory is not yet present in older Linux versions of the MT Software Suite. The drivers can be installed separately using:
+```
+sudo /sbin/modprobe ftdi_sio
+echo 2639 0301 | sudo tee /sys/bus/usb-serial/drivers/ftdi_sio/new_id
+```
 then install the .sh file
 ```
 sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
