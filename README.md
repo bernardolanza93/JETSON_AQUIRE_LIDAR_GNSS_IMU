@@ -46,24 +46,16 @@ tar -xzf MT_Software_Suite...
 ```
 also dependencies that is needed
 ```
+sudo apt update
 pip install keyboard
+sudo apt install build-essential
+sudo apt install libtool
+sudo apt install sharutils
 ```
 
 then install the .sh file
 ```
 sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
-```
-
-if you have this error install...
-```
-udecode could not be found' sharutils
-```
-
-```
-sudo apt update
-```
-```
-sudo apt install sharutils
 ```
 
 
