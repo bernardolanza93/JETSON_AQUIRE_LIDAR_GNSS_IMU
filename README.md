@@ -109,6 +109,21 @@ The board is acquired through a serial connection.
 Connect the board to the computer via USB.
 Identify the name of the serial port, which is often "dev/tty".
 In the Python code, there is a loop that checks which material is transmitting and on which port to listen.
+# CUDA
+your release: 
+```
+dpkg -l | grep 'nvidia-l4t-core'
+```
+want CUDA drivers: 
+```
+sudo apt-get install nvidia-l4t-cuda
+```
+or:
+```
+sudo apt update
+sudo apt-get install nvidia-l4t-core
+```
+
 
 # LIDAR 
 
