@@ -51,6 +51,7 @@ pip install keyboard
 sudo apt install build-essential
 sudo apt install libtool
 sudo apt install sharutils
+sudo apt-get install libusb-1.0-0-dev
 ```
 
 then install the .sh file
