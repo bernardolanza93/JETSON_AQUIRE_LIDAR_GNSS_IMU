@@ -22,6 +22,10 @@ to see the specific of IMU MTi 610 go there
 ```
 https://mtidocs.movella.com/development-board
 ```
+A Guide for configuring MTi SDK for Jetson nano:
+```
+https://base.movella.com/s/article/Interfacing-MTi-devices-with-the-NVIDIA-Jetson-1605870420176?language=en_US
+```
 Download MTi SDK from here:
 ```
 https://www.movella.com/support/software-documentation
