@@ -59,6 +59,16 @@ The MTi USB dongle allows users to connect the robust MTi 600-series (such as th
 sudo /sbin/modprobe ftdi_sio
 echo 2639 0301 | sudo tee /sys/bus/usb-serial/drivers/ftdi_sio/new_id
 ```
+After installing the drivers, the USB dongle should automatically be mounted to ttyUSB. This can be verified using the dmesg command. If this is not the case any more after rebooting your system, consider adding a udev rule:
+Create a file called “95-xsens-ftdi.rules” in the folder /etc/udev/rules.d with the following contents:
+```
+ACTION=="add" \
+, ATTRS{idVendor}=="2639" \
+, ATTRS{idProduct}=="0301" \
+, RUN{builtin}+="kmod load ftdi_sio" \
+, RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
+```
+
 then install the .sh file
 ```
 sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
