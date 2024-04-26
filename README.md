@@ -70,6 +70,10 @@ Make sure that you have Xsens MT SDK installed on your system. Before you start 
 All information about how to compile and link a program can be found in either the Visual Studio Solution file or the Makefiles, located in 'src_cpp' example folder. Or you can simply copy xspublic folder, which contains Makefiles, from MTDSK directory to your application directory and start developing.
 
 To compile exapmples: 
+Note: If you are using the MTi 10-series or MTi 100-series with a direct USB cable, make sure to have libusb installed, and build the examples using:
+```
+sudo make HAVE_LIBUSB=1
+```
 ```
 sudo make
 ```
