@@ -63,10 +63,10 @@ After installing the drivers, the USB dongle should automatically be mounted to 
 Create a file called “95-xsens-ftdi.rules” in the folder /etc/udev/rules.d with the following contents:
 ```
 ACTION=="add" \
-, ATTRS{idVendor}=="2639" \
-, ATTRS{idProduct}=="0301" \
-, RUN{builtin}+="kmod load ftdi_sio" \
-, RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
+ATTRS{idVendor}=="2639" \
+ATTRS{idProduct}=="0301" \
+RUN{builtin}+="kmod load ftdi_sio" \
+RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
 ```
 
 then install the .sh file
