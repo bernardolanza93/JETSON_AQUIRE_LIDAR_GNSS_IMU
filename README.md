@@ -22,6 +22,10 @@ to see the specific of IMU MTi 610 go there
 ```
 https://mtidocs.movella.com/development-board
 ```
+A Guide for configuring MTi SDK for Jetson nano:
+```
+https://base.movella.com/s/article/Interfacing-MTi-devices-with-the-NVIDIA-Jetson-1605870420176?language=en_US
+```
 Download MTi SDK from here:
 ```
 https://www.movella.com/support/software-documentation
@@ -42,24 +46,32 @@ tar -xzf MT_Software_Suite...
 ```
 also dependencies that is needed
 ```
+sudo apt update
 pip install keyboard
+sudo apt install build-essential
+sudo apt install libtool
+sudo apt install sharutils
+sudo apt-get install libusb-1.0-0-dev
+```
+
+The MTi USB dongle allows users to connect the robust MTi 600-series (such as the MTi-680G) to a USB port. Support for this accessory is not yet present in older Linux versions of the MT Software Suite. The drivers can be installed separately using:
+```
+sudo /sbin/modprobe ftdi_sio
+echo 2639 0301 | sudo tee /sys/bus/usb-serial/drivers/ftdi_sio/new_id
+```
+After installing the drivers, the USB dongle should automatically be mounted to ttyUSB. This can be verified using the dmesg command. If this is not the case any more after rebooting your system, consider adding a udev rule:
+Create a file called “95-xsens-ftdi.rules” in the folder /etc/udev/rules.d with the following contents:
+```
+ACTION=="add" \
+ATTRS{idVendor}=="2639" \
+ATTRS{idProduct}=="0301" \
+RUN{builtin}+="kmod load ftdi_sio" \
+RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
 ```
 
 then install the .sh file
 ```
 sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
-```
-
-if you have this error install...
-```
-udecode could not be found' sharutils
-```
-
-```
-sudo apt update
-```
-```
-sudo apt install sharutils
 ```
 
 
@@ -135,6 +147,10 @@ Make sure that you have Xsens MT SDK installed on your system. Before you start 
 All information about how to compile and link a program can be found in either the Visual Studio Solution file or the Makefiles, located in 'src_cpp' example folder. Or you can simply copy xspublic folder, which contains Makefiles, from MTDSK directory to your application directory and start developing.
 
 To compile exapmples: 
+Note: If you are using the MTi 10-series or MTi 100-series with a direct USB cable, make sure to have libusb installed, and build the examples using:
+```
+sudo make HAVE_LIBUSB=1
+```
 ```
 sudo make
 ```
@@ -170,6 +186,21 @@ The board is acquired through a serial connection.
 Connect the board to the computer via USB.
 Identify the name of the serial port, which is often "dev/tty".
 In the Python code, there is a loop that checks which material is transmitting and on which port to listen.
+# CUDA
+your release: 
+```
+dpkg -l | grep 'nvidia-l4t-core'
+```
+want CUDA drivers: 
+```
+sudo apt-get install nvidia-l4t-cuda
+```
+or:
+```
+sudo apt update
+sudo apt-get install nvidia-l4t-core
+```
+
 
 # LIDAR 
 
