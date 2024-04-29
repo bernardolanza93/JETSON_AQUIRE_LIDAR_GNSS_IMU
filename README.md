@@ -96,8 +96,7 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y build-essential python3-pip python3-dev
 sudo -H pip3 install -U setuptools rosdep rosinstall_generator vcstool
 ```
-https://jetsonhacks.com/2019/10/23/install-ros-on-jetson-nano/
-
+https://www.stereolabs.com/blog/ros-and-nvidia-jetson-nano
 ## Getting started
 
 Make sure that you have Xsens MT SDK installed on your system. Before you start using the public XDA, we recommend taking a look at the 'Public XDA Examples', available in the Examples folder from installed MTSDK directory. So you will have some idea how to use it in your application.
