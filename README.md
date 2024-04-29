@@ -68,6 +68,67 @@ link libraries:
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/xsens/lib
 ```
 
+## ROS 1 Noetic install guide:
+Important Note: Due to its upcoming end-of-life, consider ROS 2 (Foxy) for new projects as it offers better performance and support.
+ROS Noetic will reach its end-of-life in May 2025
+Update system and install dependencies:
+```
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y build-essential python3-pip python3-dev
+sudo -H pip3 install -U setuptools rosdep rosinstall_generator vcstool
+```
+Initialize rosdep and update:
+```
+sudo rosdep init
+rosdep update
+```
+
+Create a ROS workspace:
+```
+mkdir -p ~/ros_catkin_ws
+cd ~/ros_catkin_ws
+```
+Generate a ROS install file (modify for specific needs):
+```
+rosinstall_generator robot perception --rosdistro noetic --deps --tar > noetic-robot-perception.rosinstall
+```
+This generates a file named noetic-robot-perception.rosinstall that specifies ROS packages for robots and perception tasks.
+You can modify this command to include specific packages you need.
+
+
+Import the ROS packages:
+```
+vcs import --input noetic-robot-perception.rosinstall src
+```
+
+Install ROS dependencies:
+```
+rosdep install --from-paths src --ignore-packages-from-source --rosdistro noetic -y -r
+```
+The -r flag attempts to resolve any missing dependencies.
+
+Build ROS packages (might require additional troubleshooting):
+```
+sudo ./src/catkin/bin/catkin_make_isolated --install -DCMAKE_BUILD_TYPE=Release -DPYTHON_EXE
+```
+Optional: Add ROS setup to your bashrc:
+
+```
+echo "source /opt/ros/noetic/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+This will automatically source ROS Noetic every time you open a new terminal.
+
+Verify the installation:
+```
+roscd
+echo "ROS Noetic is installed!"
+```
+
+You might encounter missing dependencies during installation. Search online for solutions or consider using a virtual environment to manage ROS dependencies.
+This guide provides a basic installation process. Refer to the ROS Noetic documentation for more details and troubleshooting: http://wiki.ros.org/Documentation
+
+
 ## Getting started
 
 Make sure that you have Xsens MT SDK installed on your system. Before you start using the public XDA, we recommend taking a look at the 'Public XDA Examples', available in the Examples folder from installed MTSDK directory. So you will have some idea how to use it in your application.
