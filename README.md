@@ -81,7 +81,11 @@ sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
 ```
 
 
-After installing the drivers, the USB dongle should automatically be mounted to ttyUSB. This can be verified using the dmesg command. If this is not the case any more after rebooting your system, consider adding a udev rule:
+After installing the drivers, the USB dongle should automatically be mounted to ttyUSB. This can be verified using the dmesg command. 
+```
+sudo dmesg | grep tty
+```
+If this is not the case any more after rebooting your system, consider adding a udev rule:
 Create a file called “95-xsens-ftdi.rules” in the folder /etc/udev/rules.d with the following contents:
 ```
 ACTION=="add" \
