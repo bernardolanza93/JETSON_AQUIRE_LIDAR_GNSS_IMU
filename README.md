@@ -10,7 +10,14 @@ install.sh
 
 ## Documentation
 
-You can find documentation here :
+### help here:
+https://github.com/xsens/xsens_mti_ros_node
+
+https://github.com/nobleo/xsens_mti_driver
+
+
+
+You can find documentation inside directory here :
 MTSDK INSTALL DIR/doc/xsensdeviceapi/doc/html/index.html
 
 ## Description Environment
@@ -59,6 +66,21 @@ The MTi USB dongle allows users to connect the robust MTi 600-series (such as th
 sudo /sbin/modprobe ftdi_sio
 echo 2639 0301 | sudo tee /sys/bus/usb-serial/drivers/ftdi_sio/new_id
 ```
+Install the MTi USB Serial Driver
+```
+$ git clone https://github.com/xsens/xsens_mt.git
+$ cd ~/xsens_mt
+$ make
+$ sudo modprobe usbserial
+$ sudo insmod ./xsens_mt.ko
+```
+
+### then install the .sh file
+```
+sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
+```
+
+
 After installing the drivers, the USB dongle should automatically be mounted to ttyUSB. This can be verified using the dmesg command. If this is not the case any more after rebooting your system, consider adding a udev rule:
 Create a file called “95-xsens-ftdi.rules” in the folder /etc/udev/rules.d with the following contents:
 ```
@@ -69,9 +91,13 @@ RUN{builtin}+="kmod load ftdi_sio" \
 RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
 ```
 
-then install the .sh file
+
+The device is recognized, but I cannot ever access the device Make sure you are in the correct group (often dialout or uucp) in order to access the device. You can test this with
 ```
-sudo ./mtsdk_linux-xxx-xxxx.x.x.sh
+$ ls -l /dev/ttyUSB0
+crw-rw---- 1 root dialout 188, 0 May  6 16:21 /dev/ttyUSB0
+$ groups
+dialout audio video usb users plugdev
 ```
 
 
