@@ -136,6 +136,10 @@ i have created a sh script to lounch it directly from home: run
 ```
 ./run_xsens.sh
 ```
+modify the properties of the data format of the node here: 
+```
+/home/usuario/catkin_ws/src/xsens_ros_mti_driver/param
+```
 # GNSS ARDUSIMPLE RTK
 
 ## Preparation of Configuration:
