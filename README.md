@@ -137,6 +137,7 @@ http://wiki.ros.org/xsens_mti_driver
 Source the environment for each terminal you work in. If necessary, add the line to your .bashrc
 ```
 source devel/setup.bash
+roslaunch xsens_mti_driver xsens_mti_node.launch
 ```
 
 i have created a sh script to lounch it directly from home: run
