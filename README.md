@@ -80,23 +80,10 @@ link libraries:
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/xsens/lib
 ```
 
-## ROS 1 Noetic install guide:
-Important Note: Due to its upcoming end-of-life, consider ROS 2 (Foxy) for new projects as it offers better performance and support.
-ROS Noetic will reach its end-of-life in May 2025
-
-you need catkin:
-```
-sudo pip3 install -U catkin_tools
-```
+## ROS 2 -> ros1 not supported on ubuntu 22 - new jetson flashing use ubuntu 22
 
 
-Update system and install dependencies:
-```
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y build-essential python3-pip python3-dev
-sudo -H pip3 install -U setuptools rosdep rosinstall_generator vcstool
-```
-https://www.stereolabs.com/blog/ros-and-nvidia-jetson-nano
+
 ## Getting started
 
 Make sure that you have Xsens MT SDK installed on your system. Before you start using the public XDA, we recommend taking a look at the 'Public XDA Examples', available in the Examples folder from installed MTSDK directory. So you will have some idea how to use it in your application.
