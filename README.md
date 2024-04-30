@@ -3,8 +3,21 @@ run this file
 ```
 install.sh
 ```
+## ROS 1 Noetic install guide:
+Important Note: Due to its upcoming end-of-life, consider ROS 2 (Foxy) for new projects as it offers better performance and support.
+ROS Noetic will reach its end-of-life in May 2025
 
+Take into account that you have to flash the jetson without the last jetpack version (6.0..) mounting ubuntu 22. It is preferred also to flaseh with SDK manager installed onto a maximum UBUNTU standalone computer with maximum the 20 LTS versione. For newer version more work is needed. So recapping:
+### host machine : Ubuntu 20
+### Jetpack versione 5.1.13 (max)
+### Ubuntu version on jetson : Ubuntu 20
 
+Follow the official guide to install ROS 1 NOETIC for linux (UBUNTU 20 max supported):
+http://wiki.ros.org/noetic/Installation/Ubuntu
+
+Follow the official guie linked in the previous guide to set up the catkin environment
+http://wiki.ros.org/catkin/Tutorials/create_a_workspace
+Then install IMU xsens drivers and library->
 
 # IMU
 
@@ -66,7 +79,7 @@ The MTi USB dongle allows users to connect the robust MTi 600-series (such as th
 sudo /sbin/modprobe ftdi_sio
 echo 2639 0301 | sudo tee /sys/bus/usb-serial/drivers/ftdi_sio/new_id
 ```
-Install the MTi USB Serial Driver
+Install the MTi USB Serial Driver (try it i get an error)
 ```
 $ git clone https://github.com/xsens/xsens_mt.git
 $ cd ~/xsens_mt
@@ -87,14 +100,19 @@ sudo dmesg | grep tty
 ```
 If this is not the case any more after rebooting your system, consider adding a udev rule:
 Create a file called “95-xsens-ftdi.rules” in the folder /etc/udev/rules.d with the following contents:
+
+```
+sudo touch /etc/udev/rules.d/95-xsens-ftdi.rules
+sudo nano /etc/udev/rules.d/95-xsens-ftdi.rules
+```
+past this and save it ctrl+w (you can use vim or other text editor 
 ```
 ACTION=="add" \
-ATTRS{idVendor}=="2639" \
-ATTRS{idProduct}=="0301" \
-RUN{builtin}+="kmod load ftdi_sio" \
-RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
+, ATTRS{idVendor}=="2639" \
+, ATTRS{idProduct}=="0301" \
+, RUN{builtin}+="kmod load ftdi_sio" \
+, RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
 ```
-
 
 The device is recognized, but I cannot ever access the device Make sure you are in the correct group (often dialout or uucp) in order to access the device. You can test this with
 ```
@@ -103,41 +121,20 @@ crw-rw---- 1 root dialout 188, 0 May  6 16:21 /dev/ttyUSB0
 $ groups
 dialout audio video usb users plugdev
 ```
-
-
 link libraries:
 ```
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/xsens/lib
 ```
 
-## ROS 1 Noetic install guide:
-Important Note: Due to its upcoming end-of-life, consider ROS 2 (Foxy) for new projects as it offers better performance and support.
-ROS Noetic will reach its end-of-life in May 2025
 
-Take into account that you have to flash the jetson without the last jetpack version (6.0..) mounting ubuntu 22. It is preferred also to flaseh with SDK manager installed onto a maximum UBUNTU standalone computer with maximum the 20 LTS versione. For newer version more work is needed. So recapping:
-### host machine : Ubuntu 20
-### Jetpack versione 5.1.13 (max)
-### Ubuntu version on jetson : Ubuntu 20
+# ROS NODE for XSENS MTI DRIVER
 
-Follow the official guide to install ROS 1 NOETIC for linux (UBUNTU 20 max supported)
+http://wiki.ros.org/xsens_mti_driver
 
-Follow the official guie linked in the previous guide to set up the catkin environment
-## Getting started
-
-Make sure that you have Xsens MT SDK installed on your system. Before you start using the public XDA, we recommend taking a look at the 'Public XDA Examples', available in the Examples folder from installed MTSDK directory. So you will have some idea how to use it in your application.
-All information about how to compile and link a program can be found in either the Visual Studio Solution file or the Makefiles, located in 'src_cpp' example folder. Or you can simply copy xspublic folder, which contains Makefiles, from MTDSK directory to your application directory and start developing.
-
-To compile exapmples: 
-Note: If you are using the MTi 10-series or MTi 100-series with a direct USB cable, make sure to have libusb installed, and build the examples using:
+i have created a sh script to lounch it directly from home: run
 ```
-sudo make HAVE_LIBUSB=1
+./run_xsens.sh
 ```
-```
-sudo make
-```
-Then you have to move the examples / (or the entire folder) because in the usr folder is not possible generate log files due to the restricted permession of this area of the PC.
-
-
 # GNSS ARDUSIMPLE RTK
 
 ## Preparation of Configuration:
