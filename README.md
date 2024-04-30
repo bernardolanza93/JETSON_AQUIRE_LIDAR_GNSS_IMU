@@ -128,7 +128,6 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/xsens/lib
 ```
 
 
-https://gitlab.com/autowarefoundation/autoware.ai/autoware/-/blob/296c223be2fba562a8fdbc98c9427634a32d63f5/ros/src/sensing/drivers/imu/packages/xsens/src/xsens_driver/src/mtdef.py
 
 # ROS NODE for XSENS MTI DRIVER
 
@@ -153,6 +152,57 @@ c++ node files saved here:
 /home/usuario/catkin_ws/src/xsens_ros_mti_driver/src
 ```
 
+Building:
+- Copy xsens_ros_mti_driver folder from your MT SDK directory into your catkin workspace 'src' folder.
+Make sure the permissions are set to o+rw on your files and directories.
+
+- Build xspublic from your catkin workspace:
+```
+$ pushd src/xsens_ros_mti_driver/lib/xspublic && make && popd
+```
+
+- Build Xsens MTi driver package:
+```
+$ catkin_make
+```
+- Source workspace:
+```
+$ source devel/setup.bash
+```
+Running:
+- Configure your MTi device to output desired data (e.g. for display example - orientation output)
+
+- Launch the Xsens MTi driver from your catkin workspace:
+
+```
+$ roslaunch xsens_mti_driver xsens_mti_node.launch
+
+```
+
+## After the device has been detected, you can communicate with it from another process / terminal window.
+For example:
+```
+$ rostopic echo /filter/quaternion
+```
+This will result in a continuous stream of data output:
+---
+header: 
+seq: 1386351
+stamp: 
+secs: 1545223809
+nsecs: 197252179
+frame_id: "imu_link"
+quaternion: 
+x: 0.00276306713931
+y: 0.00036825647112
+z: -0.89693570137
+w: -0.442152231932
+---
+
+- There is also an example that shows a 3D visualization of the device (orientation data should be enabled in the device):
+```
+$ roslaunch xsens_mti_driver display.launch
+```
 
 # GNSS ARDUSIMPLE RTK
 
