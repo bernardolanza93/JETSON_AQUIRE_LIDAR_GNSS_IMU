@@ -128,9 +128,16 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/xsens/lib
 ```
 
 
+https://gitlab.com/autowarefoundation/autoware.ai/autoware/-/blob/296c223be2fba562a8fdbc98c9427634a32d63f5/ros/src/sensing/drivers/imu/packages/xsens/src/xsens_driver/src/mtdef.py
+
 # ROS NODE for XSENS MTI DRIVER
 
 http://wiki.ros.org/xsens_mti_driver
+
+Source the environment for each terminal you work in. If necessary, add the line to your .bashrc
+```
+source devel/setup.bash
+```
 
 i have created a sh script to lounch it directly from home: run
 ```
