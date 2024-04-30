@@ -85,9 +85,9 @@ Important Note: Due to its upcoming end-of-life, consider ROS 2 (Foxy) for new p
 ROS Noetic will reach its end-of-life in May 2025
 
 Take into account that you have to flash the jetson without the last jetpack version (6.0..) mounting ubuntu 22. It is preferred also to flaseh with SDK manager installed onto a maximum UBUNTU standalone computer with maximum the 20 LTS versione. For newer version more work is needed. So recapping:
-## host machine : Ubuntu 20
-## Jetpack versione 5.1.13 (max)
-## Ubuntu version on jetson : Ubuntu 20
+### host machine : Ubuntu 20
+### Jetpack versione 5.1.13 (max)
+### Ubuntu version on jetson : Ubuntu 20
 
 Follow the official guide to install ROS 1 NOETIC for linux (UBUNTU 20 max supported)
 
