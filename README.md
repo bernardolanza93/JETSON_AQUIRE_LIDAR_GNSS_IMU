@@ -140,6 +140,12 @@ modify the properties of the data format of the node here:
 ```
 /home/usuario/catkin_ws/src/xsens_ros_mti_driver/param
 ```
+c++ node files saved here:
+```
+/home/usuario/catkin_ws/src/xsens_ros_mti_driver/src
+```
+
+
 # GNSS ARDUSIMPLE RTK
 
 ## Preparation of Configuration:
