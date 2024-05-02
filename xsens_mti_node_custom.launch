@@ -5,8 +5,7 @@
         <node  name="xsens_mti_node" pkg="xsens_mti_driver" type="xsens_mti_node" output="screen">
             <rosparam command="load" file="$(find xsens_mti_driver)/param/xsens_mti_node.yaml" />
         </node>
-    <!-- </group> -->
-    <!-- Avvia il nodo di registrazione bag per registrare i dati dal topic del dispositivo Xsens MTi -->
-        <node name="bag_recorder" pkg="rosbag" type="record" args="-a -o /percorso/del/tuo/file_bag.bag" output="screen"/>
+        <node name="bag_recorder" pkg="rosbag" type="record" args=" -o /home/usuario/Desktop/file_bag.bag /imu/data" output="screen"/>
+
 
 </launch>
