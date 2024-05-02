@@ -8,23 +8,25 @@ script1 = cartella + "ros_imu_config.sh"
 script2 = cartella + "ros_node_pub.sh"
 
 # Avvia entrambi gli script Bash contemporaneamente
-process1 = subprocess.Popen(["bash", script1], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-process2 = subprocess.Popen(["bash", script2], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+process1 = subprocess.Popen(["bash", script1], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+process2 = subprocess.Popen(["bash", script2], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
-# Ottieni l'output e l'output di errore dello script 1
-output_script1, error_script1 = process1.communicate()
-print("Output dello script 1:")
-print(output_script1)
+# Leggi e stampa l'output continuo dello script 1
+print("Output continuo dello script 1:")
+for line in iter(process1.stdout.readline, ''):
+    print(line.strip())
+    if process1.poll() is not None:
+        break
 
-# Ottieni l'output e l'output di errore dello script 2
-output_script2, error_script2 = process2.communicate()
-print("\nOutput dello script 2:")
-print(output_script2)
+# Leggi e stampa l'output continuo dello script 2
+print("\nOutput continuo dello script 2:")
+for line in iter(process2.stdout.readline, ''):
+    print(line.strip())
+    if process2.poll() is not None:
+        break
 
-# Stampa eventuali errori
-if error_script1:
-    print("\nErrore nello script 1:")
-    print(error_script1)
-if error_script2:
-    print("\nErrore nello script 2:")
-    print(error_script2)
+# Attendere che entrambi i processi completino l'esecuzione
+process1.wait()
+process2.wait()
+
+print("\nEntrambi gli script sono stati eseguiti.")
