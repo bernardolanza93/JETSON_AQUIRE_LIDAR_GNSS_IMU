@@ -11,6 +11,7 @@ script2 = cartella + "ros_node_pub.sh"
 process1 = subprocess.Popen(["bash", script1])
 process2 = subprocess.Popen(["bash", script2])
 
+
 # Attendi che entrambi i processi completino l'esecuzione
 process1.wait()
 process2.wait()
