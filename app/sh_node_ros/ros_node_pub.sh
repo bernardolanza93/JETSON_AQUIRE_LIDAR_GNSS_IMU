@@ -5,4 +5,4 @@ cd
 cd catkin_ws/
 source devel/setup.bash
 sleep 3
-rostopic echo /imu/data > ~/home/usuario/Desktop/data.txt
+rostopic echo /imu/data > /Desktop/data.txt
