@@ -147,6 +147,56 @@ modify the properties of the data format of the node here:
 ```
 /home/usuario/catkin_ws/src/xsens_ros_mti_driver/param
 ```
+### Properties:
+imu/data (sensor_msgs/Imu)
+quaternion, angular velocity and linear acceleration
+
+imu/acceleration (geometry_msgs/Vector3Stamped)
+calibrated linear acceleration
+
+imu/angular_velocity (geometry_msgs/Vector3Stamped)
+calibrated angular velocity
+
+imu/mag (geometry_msgs/Vector3Stamped)
+calibrated magnetic field
+
+imu/dq (geometry_msgs/QuaternionStamped)
+integrated angular velocity from sensor (in quaternion representation)
+
+imu/dv (geometry_msgs/Vector3Stamped)
+integrated linear acceleration from sensor
+
+imu/time_ref (sensor_msgs/TimeReference)
+timestamp from device
+
+filter/quaternion (geometry_msgs/QuaternionStamped)
+quaternion from filter
+
+filter/free_acceleration (geometry_msgs/Vector3Stamped)
+linear acceleration from filter
+
+filter/twist (geometry_msgs/TwistStamped)
+velocity and angular velocity
+
+filter/positionlla (geometry_msgs/Vector3Stamped) (MTSS2019.3.2 and later)
+filtered position output in latitude (x), longitude (y) and altitude (z) as Vector3
+
+filter/velocity (MTSS2019.3.2 and later)
+filtered velocity output as Vector3
+
+temperature (sensor_msgs/Temperature)
+temperature from device
+
+pressure (sensor_msgs/FluidPressure)
+barometric pressure from device
+
+gnss (sensor_msgs/NavSatFix)
+raw 4 Hz latitude, longitude, altitude and status data from GNSS receiver
+
+tf (geometry_msgs/TransformStamped)
+transformed orientation 
+
+
 c++ node files saved here:
 ```
 /home/usuario/catkin_ws/src/xsens_ros_mti_driver/src
