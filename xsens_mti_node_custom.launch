@@ -10,7 +10,7 @@
         <node pkg="rosbag" type="record" name="xsens_bag_recorder" output="screen">
             <param name="record" value="true"/>
             <param name="all" value="true"/>
-            <param name="output_name" value="/home/usuario/Desktop/xsens_data.bag"/>
+            <param name="file" value="/home/usuario/Desktop/xsens_data.bag"/>
             <param name="topic" value="/imu/data"/>
         </node>
 
