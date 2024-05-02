@@ -7,11 +7,6 @@
         </node>
     <!-- </group> -->
     <!-- Avvia il nodo di registrazione bag per registrare i dati dal topic del dispositivo Xsens MTi -->
-        <node pkg="rosbag" type="record" name="xsens_bag_recorder" output="screen" args="-v">
-            <param name="record" value="true"/>
-            <param name="all" value="true"/>
-            <param name="file" value="/home/usuario/Desktop/xsens_data.bag"/>
-            <param name="topic" value="/imu/data"/>
-        </node>
+        <node name="bag_recorder" pkg="rosbag" type="record" args="-a -o /percorso/del/tuo/file_bag.bag" output="screen"/>
 
 </launch>
