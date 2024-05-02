@@ -14,6 +14,8 @@ process2 = subprocess.Popen(["bash", script2])
 
 # Attendi che entrambi i processi completino l'esecuzione
 process1.wait()
+
+
 process2.wait()
 
 print("Entrambi gli script sono stati eseguiti.")
