@@ -1,7 +1,7 @@
 import subprocess
 
 # Definisci il percorso della cartella contenente gli script Bash
-cartella = "/sh_node_ros/"
+cartella = "sh_node_ros/"
 
 # Definisci il percorso completo degli script Bash
 script1 = cartella + "ros_imu_config.sh"
