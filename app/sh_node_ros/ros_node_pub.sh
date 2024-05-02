@@ -10,4 +10,4 @@ source devel/setup.bash
 
 
 sleep 5
-rostopic echo /filter/quaternion
+rostopic echo /imu/data
