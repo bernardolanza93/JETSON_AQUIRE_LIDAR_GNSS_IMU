@@ -19,3 +19,10 @@ with open("output_script2.txt", "w") as output_file:
         print(line.strip())  # Stampa l'output per vedere in tempo reale
         if process2.poll() is not None:
             break
+
+
+# Attendi che entrambi i processi completino l'esecuzione
+process1.wait()
+process2.wait()
+
+print("Entrambi gli script sono stati eseguiti.")
