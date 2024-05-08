@@ -139,7 +139,7 @@ def main():
         # Leggi i dati dal sensore seriale
         timestamp = time.time()
         gga_line = gnss_reader.read_gga_line()
-        gnss_reader.RMC_line = gga_line
+        gnss_reader.GGA_line = gga_line
 
         data_pack = str(timestamp) + " _ " + gga_line
         # Inserisci il codice per leggere i dati dal sensore seriale qui
