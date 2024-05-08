@@ -212,3 +212,31 @@ def data_saver(status,GNSS_queue):
 
 
         print("_SAVER_GNSS_ENDED RECORDING_ // FILE SAVED")
+
+
+def simple_GNSS_shower():
+
+
+    gnss_reader = ReadGNSS()
+
+
+    while True:
+
+
+
+
+        print("GNSS START ACQUIRING")
+
+
+
+
+        rmc_line = gnss_reader.read_rmc_line()
+        gnss_reader.RMC_line = rmc_line
+
+
+        timestamp = time.time()
+
+        GNSS_raw_data = [timestamp, rmc_line]
+
+        print(GNSS_raw_data)
+

@@ -1,0 +1,7 @@
+ACTION=="add" \
+, ATTRS{idVendor}=="2639" \
+, ATTRS{idProduct}=="0301" \
+, RUN{builtin}+="kmod load ftdi_sio" \
+, RUN+="/bin/sh -c 'echo 2639 0301 > /sys/bus/usb-serial/drivers/ftdi_sio/new_id'"
+
+
