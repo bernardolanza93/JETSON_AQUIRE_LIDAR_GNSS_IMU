@@ -36,40 +36,48 @@ class ReadGNSS:
         try:
             # Attempt to establish a serial connection to '/dev/ttyACM0' with a baud rate of 115200
             self.ser = serial.Serial('/dev/ttyACM0', 115200)
-        except:
-            print("no ttyACM0")
+        except Exception as e:
+            print("no ttyACM0:", e)
             try:
                 # Attempt to establish a serial connection to '/dev/ttyACM1' with a baud rate of 115200
                 self.ser = serial.Serial('/dev/ttyACM1', 115200)
-            except:
+            except Exception as e:
+                print(e)
                 try:
                     # Attempt to establish a serial connection to 'COM1' with a baud rate of 115200
                     self.ser = serial.Serial('COM1', 115200)
-                except:
+                except Exception as e:
+                    print(e)
                     try:
                         # Attempt to establish a serial connection to 'COM2' with a baud rate of 115200
                         self.ser = serial.Serial('COM2', 115200)
-                    except:
+                    except Exception as e:
+                        print(e)
                         try:
                             # Attempt to establish a serial connection to 'COM3' with a baud rate of 115200
                             self.ser = serial.Serial('COM3', 115200)
-                        except:
+                        except Exception as e:
+                            print(e)
                             try:
                                 # Attempt to establish a serial connection to 'COM4' with a baud rate of 115200
                                 self.ser = serial.Serial('COM4', 115200)
-                            except:
+                            except Exception as e:
+                                print(e)
                                 try:
                                     # Attempt to establish a serial connection to 'COM5' with a baud rate of 115200
                                     self.ser = serial.Serial('COM5', 115200)
-                                except:
+                                except Exception as e:
+                                    print(e)
                                     try:
                                         # Attempt to establish a serial connection to 'COM6' with a baud rate of 115200
                                         self.ser = serial.Serial('COM6', 115200)
-                                    except:
+                                    except Exception as e:
+                                        print(e)
                                         try:
                                             # Attempt to establish a serial connection to 'COM7' with a baud rate of 115200
                                             self.ser = serial.Serial('COM7', 115200)
-                                        except:
+                                        except Exception as e:
+                                            print(e)
                                             # Print error message if Ardusimple is not available and exit
                                             print("Error. Ardusimple not available!")
 

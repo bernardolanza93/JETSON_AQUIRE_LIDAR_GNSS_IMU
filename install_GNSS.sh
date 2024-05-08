@@ -1,4 +1,4 @@
-pip install serial
+sudo pip install pyserial
 
 
 
