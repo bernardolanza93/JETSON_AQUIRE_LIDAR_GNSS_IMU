@@ -1,0 +1,3 @@
+<launch>
+    <node name="GNSS_node" pkg="GNSS" type="GNSS_node.py" output="screen"/>
+</launch>
