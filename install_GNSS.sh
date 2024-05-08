@@ -1,4 +1,8 @@
-sudo pip install pyserial
+sudo pip unintsall serial -y
+sudo pip unintsall pyserial -y
+
+
+sudo pip install pyserial -y
 
 
 
