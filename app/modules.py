@@ -1,7 +1,6 @@
 import multiprocessing
 import time
 import os
-import serial
 import configparser
 from datetime import datetime
 import sys
