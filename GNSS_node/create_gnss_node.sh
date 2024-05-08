@@ -1,3 +1,18 @@
+sudo pip unintsall serial -y
+sudo pip unintsall pyserial -y
+
+
+sudo pip install pyserial -y
+
+echo "You will see the /dev/ttyACM0 has been created automatically."
+ls /dev/tty*
+
+echo "display the raw data stream from the RTK Reciever located at the /dev/ttyACM0 serial port."
+sudo cat /dev/ttyACM0
+
+
+
+
 cd
 
 cd catkin_ws/

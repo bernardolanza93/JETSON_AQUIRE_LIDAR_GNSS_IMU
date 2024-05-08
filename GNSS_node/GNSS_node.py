@@ -3,6 +3,7 @@
 import rospy
 from std_msgs.msg import String
 import serial
+import time
 
 
 
@@ -136,12 +137,15 @@ def main():
 
     while not rospy.is_shutdown():
         # Leggi i dati dal sensore seriale
+        timestamp = time.time()
         rmc_line = gnss_reader.read_rmc_line()
         gnss_reader.RMC_line = rmc_line
-        # Inserisci il codice per leggere i dati dal sensore seriale qui
-        rospy.loginfo(rmc_line)
 
-        pub.publish(rmc_line)
+        data_pack = str(timestamp) + " _ " + rmc_line
+        # Inserisci il codice per leggere i dati dal sensore seriale qui
+        rospy.loginfo(data_pack)
+
+        pub.publish(data_pack)
         rate.sleep()
 
 if __name__ == '__main__':
