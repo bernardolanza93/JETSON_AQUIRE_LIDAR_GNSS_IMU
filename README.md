@@ -13,6 +13,12 @@ https://github.com/valdivj/Azure-for-Kinect-Jetson-nano
 download and copy to the catkin_ws / src folder the ros azure drivers from the website guide:
 https://scazlab.github.io/azure_setup_guide.html
 
+Please note that you may need to run 
+```
+catkin_make --force-cmake
+```
+to update the SDK binaries which are copied into the ROS output folders.
+
 
 ## ROS 1 Noetic install guide:
 Important Note: Due to its upcoming end-of-life, consider ROS 2 (Foxy) for new projects as it offers better performance and support.
