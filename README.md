@@ -4,6 +4,16 @@ run this file
 ```
 install.sh
 ```
+
+## AZURE KINECT
+required ros installed
+download and install sdk manager for azure kinect following :
+https://github.com/valdivj/Azure-for-Kinect-Jetson-nano
+
+download and copy to the catkin_ws / src folder the ros azure drivers from the website guide:
+https://scazlab.github.io/azure_setup_guide.html
+
+
 ## ROS 1 Noetic install guide:
 Important Note: Due to its upcoming end-of-life, consider ROS 2 (Foxy) for new projects as it offers better performance and support.
 ROS Noetic will reach its end-of-life in May 2025
