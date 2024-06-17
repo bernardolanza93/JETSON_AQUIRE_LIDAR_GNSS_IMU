@@ -118,7 +118,6 @@ def interpolate_imu_data(pc_timestamps, imu_timestamps, euler_angles, displaceme
     return interpolated_euler_angles, interpolated_displacements
 
 
-
 def transform_pointcloud(pc, translation, rotation):
     # Apply the rotation
     r = R.from_euler('xyz', rotation, degrees=False)
@@ -138,7 +137,6 @@ def apply_transformations(pointclouds, euler_angles, displacements):
         transformed_pointclouds.append(transformed_pc)
 
     return transformed_pointclouds
-
 
 
 def downsample_pointcloud(pc, voxel_size=0.05):

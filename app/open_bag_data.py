@@ -10,7 +10,7 @@ import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 from SLAM_V1_decoder_to_map import *
-from zed_utility_for_pointcloud_and_function_manage import *
+
 import sys
 import matplotlib.pyplot as plt
 import numpy as np
@@ -135,60 +135,24 @@ def alpha_version_main_list_topic_read_bag_generic_file():
 # Function to extract and display images from the bag file
 
 
-def stream_images_D455(bag_file, rgb_topic = "/camera/color/image_raw", depth_topic = "/camera/depth/image_raw"):
-    bridge = CvBridge()
-    depth_msg_count = 0  # Contatore per i messaggi di profondità
+def extract_and_save_gnss_data(bag_file, topic_gnss="/GNSS", output_file="gnss_data.json"):
+    gnss_data = []
 
+    gg = 0
     with rosbag.Bag(bag_file, 'r') as bag:
-        for topic, msg, t in bag.read_messages(topics=[rgb_topic, depth_topic]):
-            try:
-                if topic == rgb_topic:
-                    rgb_image = bridge.imgmsg_to_cv2(msg, "bgr8")
-                    cv2.imshow("RGB Image", rgb_image)
-                elif topic == depth_topic:
-                    depth_msg_count += 1
-                    depth_image = bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-                    depth_image_normalized = cv2.normalize(depth_image, None, 0, 255, cv2.NORM_MINMAX)
-                    depth_image_normalized = cv2.convertScaleAbs(depth_image_normalized)
-                    cv2.imshow("Depth Image", depth_image_normalized)
+        for topic, msg, t in bag.read_messages(topics=[topic_gnss]):
+            print(msg)
+            gg += 1
+            gnss_entry = {
+                'timestamp': t.to_sec(),
+                'data': msg.data
+            }
+            gnss_data.append(gnss_entry)
+            print("gnss extraction:", gg)
 
-                # Aspetta 1 ms per la chiave, per terminare premere 'q'
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
+    with open(output_file, 'w') as f:
+        json.dump(gnss_data, f)
 
-            except CvBridgeError as e:
-                print(e)
-                continue
-
-    print(f"Numero totale di messaggi di profondità letti: {depth_msg_count}")
-    cv2.destroyAllWindows()
-
-
-def extract_images_zed(bag_file):
-    # Initialize CvBridge
-    bridge = CvBridge()
-
-    # Open the bag file
-    with rosbag.Bag(bag_file, 'r') as bag:
-        for topic, msg, t in bag.read_messages(topics=['/zedxm/zed_node/left_raw/image_raw_color']):
-            print(f"Reading message from topic {topic} at time {t.to_sec()}")
-
-            try:
-                # Convert ROS message to OpenCV image
-                cv_image = bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-
-                # Display the image using OpenCV
-                cv2.imshow("Image", cv_image)
-                cv2.waitKey(0)  # Wait for a key press
-
-                # Debug print
-                print(f"Image at time {t.to_sec()} displayed.")
-
-            except CvBridgeError as e:
-                print(f"Error converting image: {e}")
-
-    # Close all OpenCV windows when done
-    cv2.destroyAllWindows()
 def save_pointclouds_with_poses(pointclouds, poses, output_dir='results'):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -200,10 +164,90 @@ def save_pointclouds_with_poses(pointclouds, poses, output_dir='results'):
 
 # Function to extract and display point clouds from the bag file
 
+def load_pointclouds_from_rosbag(bag_file, pc_topic, imu_topic):
+    bag = rosbag.Bag(bag_file)
+    pointclouds = []
+    pc_timestamps = []
+    imu_data = []
+    imu_timestamps = []
+    ii = 0
 
+    for topic, msg, t in bag.read_messages(topics=[pc_topic, imu_topic]):
+
+
+        ii += 1
+
+        if topic == pc_topic:
+            pc = pointcloud2_to_o3d(msg)
+            pointclouds.append(pc)
+            pc_timestamps.append(t.to_sec())
+        elif topic == imu_topic:
+            imu_data.append(msg)
+            imu_timestamps.append(t.to_sec())
+
+        print("extraction bag:",ii)
+
+
+
+    bag.close()
+    return pointclouds, pc_timestamps, imu_data, imu_timestamps
+
+
+
+def save_imu_data_to_file(imu_data, imu_timestamps, filename="imu_data.json"):
+    data = {
+        "timestamps": imu_timestamps,
+        "linear_acceleration_x": [imu.linear_acceleration.x for imu in imu_data],
+        "linear_acceleration_y": [imu.linear_acceleration.y for imu in imu_data],
+        "linear_acceleration_z": [imu.linear_acceleration.z for imu in imu_data],
+        "angular_velocity_x": [imu.angular_velocity.x for imu in imu_data],
+        "angular_velocity_y": [imu.angular_velocity.y for imu in imu_data],
+        "angular_velocity_z": [imu.angular_velocity.z for imu in imu_data],
+    }
+    with open(filename, 'w') as f:
+        json.dump(data, f)
+
+def extract_dump_imu_orientation(bag_file, topic_gnss="/imu/data", output_file="imu_partial_xsens_data.json"):
+    imu_data = []
+
+    with rosbag.Bag(bag_file, 'r') as bag:
+        for topic, msg, t in bag.read_messages(topics=[topic_gnss]):
+            imu_entry = {
+                'header': {
+                    'seq': msg.header.seq,
+                    'stamp': {
+                        'secs': msg.header.stamp.secs,
+                        'nsecs': msg.header.stamp.nsecs
+                    },
+                    'frame_id': msg.header.frame_id
+                },
+                'orientation': {
+                    'x': msg.orientation.x,
+                    'y': msg.orientation.y,
+                    'z': msg.orientation.z,
+                    'w': msg.orientation.w
+                },
+                'orientation_covariance': list(msg.orientation_covariance),
+                'timestamp': {
+                    'secs': t.secs,
+                    'nsecs': t.nsecs
+                }
+            }
+            imu_data.append(imu_entry)
+
+    with open(output_file, 'w') as f:
+        json.dump(imu_data, f, indent=4)
 if __name__ == "__main__":
 
     #main()
-    main_zed()
+    #main_zed()
+    bag_file = "/home/mmt-ben/Downloads/20240531_120721.bag"
+
+
+    list_topics(bag_file)
+    extract_dump_imu_orientation(bag_file)
+
+    #extract_and_save_gnss_data(bag_file)
+
 
 

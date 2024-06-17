@@ -40,6 +40,7 @@ def load_intrinsics():
 intrinsics = load_intrinsics()
 print(intrinsics)
 
+
 def load_images(rgb_folder, depth_folder, skip_start=0, skip_end=0):
     rgb_images = []
     depth_images = []
@@ -68,22 +69,13 @@ def load_images(rgb_folder, depth_folder, skip_start=0, skip_end=0):
             # Carica l'immagine di profondità
             depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
 
-            # Verifica se le immagini sono state caricate correttamente
-            if rgb_image is not None:
-                print(f"Loaded RGB image {rgb_path} successfully.")
-            else:
-                print(f"Failed to load RGB image {rgb_path}.")
-
-            if depth_image is not None:
-                print(f"Loaded Depth image {depth_path} successfully.")
-            else:
-                print(f"Failed to load Depth image {depth_path}.")
-
-            # Assicurati che le immagini siano aggiunte solo se entrambe sono caricate correttamente
             if rgb_image is not None and depth_image is not None:
                 rgb_images.append(rgb_image)
                 depth_images.append(depth_image)
                 timestamps.append(timestamp_rgb)
+                print(f"Loaded RGB image {rgb_path} and Depth image {depth_path} successfully.")
+            else:
+                print(f"Failed to load images for timestamp {timestamp_rgb}.")
         else:
             print(f"No matching depth image for RGB timestamp {timestamp_rgb}.")
 
@@ -102,6 +94,14 @@ def rgbd_slam(rgb_images, depth_images, intrinsics):
     poses = [pose]
 
     for i, (color, depth) in enumerate(zip(rgb_images, depth_images)):
+        # Verifica delle immagini RGB e di profondità
+        if color is None or depth is None:
+            print(f"Frame {i}: One or both images are None. Skipping.")
+            continue
+
+        print(f"Frame {i}: RGB image shape: {color.shape}, Depth image shape: {depth.shape}")
+
+        # Crea l'immagine RGBD
         rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
             o3d.geometry.Image(color),
             o3d.geometry.Image(depth),
@@ -131,15 +131,26 @@ def rgbd_slam(rgb_images, depth_images, intrinsics):
         volume.integrate(rgbd_image, intrinsics, np.linalg.inv(pose))
         print(f"Integrated frame {i}, Pose:\n{pose}")
 
-    # Extract the point cloud from the TSDF volume
-    pcd = volume.extract_point_cloud()
-    pcd.estimate_normals()
+        # Debug: Check volume data after integration
+        tsdf_pcd = volume.extract_voxel_point_cloud()
+        if tsdf_pcd is None or len(tsdf_pcd.points) == 0:
+            print(f"Voxel point cloud extraction failed for frame {i} or resulted in an empty point cloud.")
+        else:
+            print(f"Voxel point cloud extracted for frame {i}, contains {len(tsdf_pcd.points)} points.")
 
-    if pcd is None or len(pcd.points) == 0:
-        print("Point cloud extraction failed or resulted in an empty point cloud.")
+    # Extract the mesh from the TSDF volume
+    mesh = volume.extract_triangle_mesh()
+    if mesh is None or len(mesh.vertices) == 0:
+        print("Final mesh extraction failed or resulted in an empty mesh.")
         return None, poses
 
-    o3d.visualization.draw_geometries([pcd], point_show_normal=True)
+    mesh.compute_vertex_normals()
+    o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
+
+    # Convert the mesh to a point cloud
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = mesh.vertices
+    pcd.normals = mesh.vertex_normals
 
     return pcd, poses
 
@@ -154,17 +165,16 @@ def VISUAL_SLAM_ZED():
 
     # Load images and intrinsics
     rgb_images, depth_images, timestamps = load_images(rgb_folder, depth_folder)
-    print("loaded : ", len(rgb_images))
-    intrinsics = load_intrinsics()
-
-    pcd, poses = rgbd_slam(rgb_images, depth_images, intrinsics)
-
-    if pcd is not None:
-        output_ply = 'output_RGBDVSLAM_ZED.ply'
-        o3d.io.write_point_cloud(output_ply, pcd)
+    if len(rgb_images) == 0 or len(depth_images) == 0:
+        print("No images loaded. Please check the image folders.")
     else:
-        print("No point cloud to write.")
+        pcd, poses = rgbd_slam(rgb_images, depth_images, intrinsics)
 
+        if pcd is not None:
+            output_ply = 'output_RGBDVSLAM_ZED.ply'
+            o3d.io.write_point_cloud(output_ply, pcd)
+        else:
+            print("No point cloud to write.")
 
 
 

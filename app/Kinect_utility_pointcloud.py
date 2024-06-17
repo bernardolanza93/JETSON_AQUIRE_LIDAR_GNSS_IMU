@@ -7,12 +7,16 @@ from pyk4a import PyK4APlayback, ImageFormat
 import open3d as o3d
 import numpy as np
 import sys
+
 import open3d as o3d
 import glob
 import cv2
 import os
 import subprocess
 import open3d as o3d
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('agg')
 import glob
 import open3d as o3d
 import numpy as np
@@ -113,6 +117,7 @@ def extract_and_visualize(playback: PyK4APlayback, output_dir, timestamp_map, fr
     """
     frame_count = 0
 
+
     while True:
         try:
             capture = playback.get_next_capture()
@@ -138,13 +143,21 @@ def extract_and_visualize(playback: PyK4APlayback, output_dir, timestamp_map, fr
                         f"Timestamp {sensor_timestamp} non trovato nella tabella di conversione e frame {frame_count} non trovato.")
                     continue
 
+                # Process point cloud
+                points = point_cloud_data.reshape(-1, 3)
+                points = points[np.isfinite(points).all(axis=1)]
+
+                # Filter points
+                condition = (points[:, 0] < 1) & (points[:, 1] < 1) & (points[:, 2] < 1)
+                points_removed_count = np.sum(condition)
+                points = points[~condition]
+
+
                 # Save point cloud
                 ply_filename = os.path.join(output_dir, 'pc', f"pointcloud_{pc_timestamp}.ply")
                 if frame_count > 520:
                     if not os.path.exists(ply_filename):
-                        # Save point cloud
-                        points = point_cloud_data.reshape(-1, 3)
-                        points = points[np.isfinite(points).all(axis=1)]
+                        # Save filtered point cloud
                         point_cloud = o3d.geometry.PointCloud()
                         point_cloud.points = o3d.utility.Vector3dVector(points)
                         o3d.io.write_point_cloud(ply_filename, point_cloud)
@@ -160,7 +173,6 @@ def extract_and_visualize(playback: PyK4APlayback, output_dir, timestamp_map, fr
 
                 SHOW_DEPTH = 0
                 if SHOW_DEPTH:
-
                     # Visualize depth image
                     depth_image_normalized = cv2.normalize(depth_image, None, 0, 255, cv2.NORM_MINMAX)
                     depth_image_normalized = np.uint8(depth_image_normalized)
@@ -172,15 +184,13 @@ def extract_and_visualize(playback: PyK4APlayback, output_dir, timestamp_map, fr
                 cv2.imshow("IR Image", ir_image_normalized)
 
                 # Visualize color image
-
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
 
                 frame_count += 1
-                print(f"Frame {frame_count} processed")
+                print(f"Frame {frame_count} processed, {points_removed_count} points removed")
 
     cv2.destroyAllWindows()
-
 
 def process_mkv_4_RGBD():
     """
@@ -475,7 +485,7 @@ def SLAM_V4():
     o3d.io.write_point_cloud("combined_kinect_point_cloud.ply", combined_pcd)
 
 
-def load_images(rgb_folder, depth_folder, skip_start=0, skip_end=4500):
+def load_images(rgb_folder, depth_folder, skip_start=2200, skip_end=2600):
     rgb_images = []
     depth_images = []
     timestamps = sorted([f.split('_')[1].split('.png')[0] for f in os.listdir(rgb_folder) if f.endswith('.png')])
@@ -492,6 +502,7 @@ def load_images(rgb_folder, depth_folder, skip_start=0, skip_end=4500):
 
         rgb_image = cv2.imread(rgb_path, cv2.IMREAD_COLOR)
         depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)  # Load as uint16
+
 
 
 
@@ -538,24 +549,21 @@ def rgbd_slam(rgb_images, depth_images, intrinsics):
         sdf_trunc=0.04,
         color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8)
 
-    print("analizing:", len(rgb_images), len(depth_images))
+    print("analyzing:", len(rgb_images), len(depth_images))
 
     # Initialize pose (identity matrix)
     pose = np.eye(4)
     poses = [pose]
 
     for i, (color, depth) in enumerate(zip(rgb_images, depth_images)):
-
-        # cv2.imshow("color",color)
-        # cv2.imshow("depth", depth)
-        #
-        # cv2.waitKey(0)  # Wait for a key press
+        # Convert depth image to o3d.geometry.Image
+        depth_image = o3d.geometry.Image(depth)
 
 
 
         rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
             o3d.geometry.Image(color),
-            o3d.geometry.Image(depth),
+            depth_image,
             depth_trunc=4.0,
             convert_rgb_to_intensity=False)
 
@@ -582,12 +590,28 @@ def rgbd_slam(rgb_images, depth_images, intrinsics):
         volume.integrate(rgbd_image, intrinsics, np.linalg.inv(pose))
         print(f"Integrated frame {i}, Pose:\n{pose}")
 
+        # Debug: Check volume data after integration
+        tsdf_pcd = volume.extract_voxel_point_cloud()
+        if tsdf_pcd is None or len(tsdf_pcd.points) == 0:
+            print(f"Voxel point cloud extraction failed for frame {i} or resulted in an empty point cloud.")
+        else:
+            print(f"Voxel point cloud extracted for frame {i}, contains {len(tsdf_pcd.points)} points.")
+
     # Extract the mesh from the TSDF volume
     mesh = volume.extract_triangle_mesh()
+    if mesh is None or len(mesh.vertices) == 0:
+        print("Final mesh extraction failed or resulted in an empty mesh.")
+        return None, poses
+
     mesh.compute_vertex_normals()
     o3d.visualization.draw_geometries([mesh], mesh_show_back_face=True)
 
-    return mesh, poses
+    # Convert the mesh to a point cloud
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = mesh.vertices
+    pcd.normals = mesh.vertex_normals
+
+    return pcd, poses
 
 
 def VISULA_SLAM():
@@ -609,14 +633,22 @@ def VISULA_SLAM():
 
 
 
-#process_mkv_4_RGBD()
-#process_mkv()
-#SLAM_V1()
-#SLAM_V2()
 
-#funziona standard ma orribile
-#SLAM_V4()
 
-#SLAM_V3()
 
-VISULA_SLAM()
+if __name__ == "__main__":
+
+
+    process_mkv_4_RGBD()
+    #process_mkv()
+    #SLAM_V1()
+    #SLAM_V2()ù
+
+
+
+    #funziona standard ma orribile
+    #SLAM_V4()
+
+    #SLAM_V3()
+
+    #VISULA_SLAM()
