@@ -24,12 +24,44 @@ import os
 from pyk4a import PyK4APlayback, CalibrationType
 from pyk4a import PyK4A
 from pyk4a import Config, PyK4APlayback
+from pyk4a import PyK4APlayback, Config, PyK4A
+
+from ctypes import c_int, c_void_p, c_char_p, POINTER
+
+
+
+
+INITIAL_LIMIT = 397
 
 # Carica esplicitamente la libreria libk4a.so
 ctypes.CDLL("libk4a.so")
 
 # Stampa la variabile d'ambiente per verifica
 print("LD_LIBRARY_PATH:", os.environ.get('LD_LIBRARY_PATH', 'Not set'))
+
+
+def load_k4a_library():
+    k4a = ctypes.CDLL("/usr/local/lib/libk4a.so")
+    return k4a
+
+def transform_color_to_depth(k4a, transformation_handle, depth_image, color_image):
+    # Define the k4a_image_t type
+    k4a_image_t = ctypes.c_void_p
+
+    # Create k4a_image_t instances for depth and color images
+    depth_image_t = k4a_image_t(depth_image.ctypes.data_as(ctypes.c_void_p))
+    color_image_t = k4a_image_t(color_image.ctypes.data_as(ctypes.c_void_p))
+
+    # Create transformed color image placeholder
+    transformed_color_image = np.zeros_like(color_image)
+    transformed_color_image_t = k4a_image_t(transformed_color_image.ctypes.data_as(ctypes.c_void_p))
+
+    # Perform the transformation
+    k4a.k4a_transformation_color_image_to_depth_camera(transformation_handle,
+                                                       depth_image_t,
+                                                       transformed_color_image_t)
+    return transformed_color_image
+
 
 
 def RGBD_extraction(playback: PyK4APlayback, output_rgb_dir: str, output_depth_dir: str, output_intrinsics_file: str, timestamp_map: dict, frame_map: dict):
@@ -47,11 +79,13 @@ def RGBD_extraction(playback: PyK4APlayback, output_rgb_dir: str, output_depth_d
     frame_count = 0
     intrinsics_saved = False
 
+
     while True:
         try:
             capture = playback.get_next_capture()
         except EOFError:
             break
+
 
         if capture is not None:
             depth_image = capture.depth
@@ -61,38 +95,41 @@ def RGBD_extraction(playback: PyK4APlayback, output_rgb_dir: str, output_depth_d
             if depth_image is not None and color_image is not None:
                 sensor_timestamp = capture.depth_timestamp_usec
 
-                # Convert sensor timestamp to global timestamp using frame number if necessary
-                if sensor_timestamp in timestamp_map:
-                    pc_timestamp = timestamp_map[sensor_timestamp]
-                elif frame_count in frame_map:
-                    pc_timestamp = frame_map[frame_count]
-                else:
-                    print(f"Timestamp {sensor_timestamp} non trovato nella tabella di conversione e frame {frame_count} non trovato.")
-                    continue
+                if frame_count > INITIAL_LIMIT:
+                    print("+save")
 
-                # Save RGB image as PNG
-                rgb_filename = os.path.join(output_rgb_dir, f"color_{pc_timestamp}.png")
-                if not os.path.exists(rgb_filename):
-                    cv2.imwrite(rgb_filename, color_image)
-                else:
-                    print(f"RGB image {rgb_filename} already exists. Skipping...")
+                    # Convert sensor timestamp to global timestamp using frame number if necessary
+                    if sensor_timestamp in timestamp_map:
+                        pc_timestamp = timestamp_map[sensor_timestamp]
+                    elif frame_count in frame_map:
+                        pc_timestamp = frame_map[frame_count]
+                    else:
+                        print(f"Timestamp {sensor_timestamp} non trovato nella tabella di conversione e frame {frame_count} non trovato.")
+                        continue
 
-                # Save depth image in int16 format
-                depth_filename = os.path.join(output_depth_dir, f"depth_{pc_timestamp}.png")
-                if not os.path.exists(depth_filename):
-                    cv2.imwrite(depth_filename, depth_image.astype(np.uint16))
-                else:
-                    print(f"Depth image {depth_filename} already exists. Skipping...")
+                    # Save RGB image as PNG
+                    rgb_filename = os.path.join(output_rgb_dir, f"color_{pc_timestamp}.png")
+                    if not os.path.exists(rgb_filename):
+                        cv2.imwrite(rgb_filename, color_image)
+                    else:
+                        print(f"RGB image {rgb_filename} already exists. Skipping...")
 
-                # Save intrinsics once
-                if not intrinsics_saved:
-                    calibration = playback.calibration
-                    intrinsics = calibration.get_camera_matrix(CalibrationType.COLOR)
-                    distortion = calibration.get_distortion_coefficients(CalibrationType.COLOR)
-                    with open(output_intrinsics_file, 'w') as f:
-                        f.write(f"Camera Intrinsics:\n{intrinsics}\n")
-                        f.write(f"Distortion Coefficients:\n{distortion}\n")
-                    intrinsics_saved = True
+                    # # Save depth image in int16 format
+                    # depth_filename = os.path.join(output_depth_dir, f"depth_{pc_timestamp}.png")
+                    # if not os.path.exists(depth_filename):
+                    #     cv2.imwrite(depth_filename, depth_image.astype(np.uint16))
+                    # else:
+                    #     print(f"Depth image {depth_filename} already exists. Skipping...")
+
+                    # Save intrinsics once
+                    if not intrinsics_saved:
+                        calibration = playback.calibration
+                        intrinsics = calibration.get_camera_matrix(CalibrationType.COLOR)
+                        distortion = calibration.get_distortion_coefficients(CalibrationType.COLOR)
+                        with open(output_intrinsics_file, 'w') as f:
+                            f.write(f"Camera Intrinsics:\n{intrinsics}\n")
+                            f.write(f"Distortion Coefficients:\n{distortion}\n")
+                        intrinsics_saved = True
 
                 frame_count += 1
                 print(f"Frame {frame_count} processed")
@@ -106,17 +143,11 @@ def load_timestamp_conversion(file_path):
     frame_map = dict(zip(timestamp_conversion['frame'], timestamp_conversion['pc timestamp']))
     return timestamp_map, frame_map
 
-def extract_and_visualize(playback: PyK4APlayback, output_dir, timestamp_map, frame_map):
-    """
-    Extract point clouds and images from Kinect Azure MKV file and save them to the output directory.
 
-    Args:
-        playback (PyK4APlayback): Playback object for Kinect Azure MKV files.
-        output_dir (str): Directory to save the output (point clouds and images).
-        timestamp_map (dict): Dictionary to map sensor timestamps to global timestamps.
-    """
+
+def extract_and_visualize(playback, output_dir, timestamp_map, frame_map):
+
     frame_count = 0
-
 
     while True:
         try:
@@ -125,12 +156,10 @@ def extract_and_visualize(playback: PyK4APlayback, output_dir, timestamp_map, fr
             break
 
         if capture is not None:
-            point_cloud_data = capture.depth_point_cloud
             depth_image = capture.depth
-            color_image = capture.color
-            ir_image = capture.ir
+            color_image = cv2.imdecode(np.frombuffer(capture.color, np.uint8), cv2.IMREAD_COLOR)
 
-            if point_cloud_data is not None and depth_image is not None and color_image is not None and ir_image is not None:
+            if depth_image is not None and color_image is not None:
                 sensor_timestamp = capture.depth_timestamp_usec
 
                 # Convert sensor timestamp to global timestamp using frame number if necessary
@@ -139,58 +168,65 @@ def extract_and_visualize(playback: PyK4APlayback, output_dir, timestamp_map, fr
                 elif frame_count in frame_map:
                     pc_timestamp = frame_map[frame_count]
                 else:
-                    print(
-                        f"Timestamp {sensor_timestamp} non trovato nella tabella di conversione e frame {frame_count} non trovato.")
+                    print(f"Timestamp {sensor_timestamp} non trovato.")
                     continue
 
-                # Process point cloud
-                points = point_cloud_data.reshape(-1, 3)
-                points = points[np.isfinite(points).all(axis=1)]
+                # # Obtain the calibration
+                # calibration = playback.calibration
+                # intrinsics = calibration.get_camera_matrix(CalibrationType.DEPTH)
+                # fx, fy, cx, cy = intrinsics[0, 0], intrinsics[1, 1], intrinsics[0, 2], intrinsics[1, 2]
+                # height, width = depth_image.shape
+                #
+                # x = np.linspace(0, width - 1, width)
+                # y = np.linspace(0, height - 1, height)
+                # xv, yv = np.meshgrid(x, y)
+                #
+                # z = depth_image / 1000.0  # Convert from mm to meters
+                # x = (xv - cx) * z / fx
+                # y = (yv - cy) * z / fy
 
-                # Filter points
-                condition = (points[:, 0] < 1) & (points[:, 1] < 1) & (points[:, 2] < 1)
-                points_removed_count = np.sum(condition)
-                points = points[~condition]
 
 
-                # Save point cloud
-                ply_filename = os.path.join(output_dir, 'pc', f"pointcloud_{pc_timestamp}.ply")
-                if frame_count > 520:
-                    if not os.path.exists(ply_filename):
-                        # Save filtered point cloud
+                if frame_count > INITIAL_LIMIT:
+
+                    point_cloud_data = capture.depth_point_cloud
+                    points = point_cloud_data.reshape(-1, 3)
+                    points = points[np.isfinite(points).all(axis=1)]
+                    capture._color = cv2.cvtColor(cv2.imdecode(capture.color, cv2.IMREAD_COLOR), cv2.COLOR_BGR2BGRA)
+                    capture._color_format = pyk4a.ImageFormat.COLOR_BGRA32
+                    transformed_color_img = cv2.cvtColor(capture.transformed_color, cv2.COLOR_BGR2RGB)
+                    colors = transformed_color_img.reshape(-1, 3) / 255
+                    # Remove invalid points
+                    condition = (points[:, 0] < 1) & (points[:, 1] < 1) & (points[:, 2] < 1)
+                    points = points[~condition]
+                    colors = colors[~condition]
+                    #Create and save the point cloud
+
+                    SAVE = 1
+                    if SAVE:
                         point_cloud = o3d.geometry.PointCloud()
                         point_cloud.points = o3d.utility.Vector3dVector(points)
+                        point_cloud.colors = o3d.utility.Vector3dVector(colors)
+                        ply_filename = os.path.join(output_dir, f"pointcloud_{pc_timestamp}.ply")
                         o3d.io.write_point_cloud(ply_filename, point_cloud)
-                    else:
-                        print(f"Point cloud {ply_filename} already exists. Skipping...")
 
-                # Save color image
-                SAVE_RGB = 0
-                if SAVE_RGB:
-                    color_image_filename = os.path.join(output_dir, 'img', f"color_{pc_timestamp}.jpg")
-                    cv2.imwrite(color_image_filename, color_image)
-                    cv2.imshow("Color Image", color_image)
+                    if 0: #RENDERING
+                        # cv2.imshow("ff", transformed_color_img)
+                        # cv2.waitKey(0)
+                        #
+                        # cv2.destroyAllWindows()
 
-                SHOW_DEPTH = 0
-                if SHOW_DEPTH:
-                    # Visualize depth image
-                    depth_image_normalized = cv2.normalize(depth_image, None, 0, 255, cv2.NORM_MINMAX)
-                    depth_image_normalized = np.uint8(depth_image_normalized)
-                    cv2.imshow("Depth Image", depth_image_normalized)
+                        point_cloud = o3d.geometry.PointCloud()
+                        point_cloud.points = o3d.utility.Vector3dVector(points)
+                        point_cloud.colors = o3d.utility.Vector3dVector(colors)
+                        o3d.visualization.draw_geometries([point_cloud])
 
-                # Visualize IR image
-                ir_image_normalized = cv2.normalize(ir_image, None, 0, 255, cv2.NORM_MINMAX)
-                ir_image_normalized = np.uint8(ir_image_normalized)
-                cv2.imshow("IR Image", ir_image_normalized)
-
-                # Visualize color image
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
 
                 frame_count += 1
-                print(f"Frame {frame_count} processed, {points_removed_count} points removed")
+                print(f"Frame {frame_count} processed")
 
-    cv2.destroyAllWindows()
+    playback.close()
+
 
 def process_mkv_4_RGBD():
     """
@@ -238,7 +274,7 @@ def process_mkv():
 
 
 
-    extract_and_visualize(playback, output_dir, timestamp_map, frame_map)
+    extract_and_visualize(playback, os.path.join(output_dir, 'pc'), timestamp_map, frame_map)
 
     playback.close()
 
@@ -258,50 +294,6 @@ def pairwise_registration(source, target):
 
     return icp_fine.transformation
 
-def SLAM_V1():
-
-    # Directory contenente le point cloud
-    pointcloud_dir = "pc_ak"
-    pointcloud_files = glob.glob(pointcloud_dir + "/*.ply")
-
-    # Lista per salvare tutte le point cloud
-    pointclouds = []
-
-    iii = 0
-
-    for filename in pointcloud_files:
-        iii += 1
-        print("loading :",iii)
-        pcd = o3d.io.read_point_cloud(filename)
-        pointclouds.append(pcd)
-
-    print(f"Caricate {len(pointclouds)} point cloud.")
-
-    # Allinea le point cloud
-    aligned_pointclouds = [pointclouds[0]]
-
-    for i in range(1, len(pointclouds)):
-
-        print(f"Registrazione della point cloud {i} con la point cloud {i - 1}")
-        trans = pairwise_registration(pointclouds[i], aligned_pointclouds[-1])
-        pointclouds[i].transform(trans)
-        aligned_pointclouds.append(pointclouds[i])
-
-    print("Allineamento completato.")
-
-    # Unisci tutte le point cloud allineate
-    combined_pcd = aligned_pointclouds[0]
-    kkkk = 0
-    for pcd in aligned_pointclouds[1:]:
-
-        kkkk += 1
-        print("combined:",kkkk)
-        combined_pcd += pcd
-
-    # Salva la point cloud combinata
-    o3d.io.write_point_cloud("combined_orb_pointcloud.ply", combined_pcd)
-
-    print("Point cloud combinata salvata come combined_pointcloud.ply.")
 
 def preprocess_point_cloud(pcd, voxel_size):
     pcd_down = pcd.voxel_down_sample(voxel_size)
@@ -333,101 +325,6 @@ def refine_registration(source, target, init_transformation, voxel_size):
         o3d.pipelines.registration.TransformationEstimationPointToPlane(),
         criteria=icp_criteria)
     return result
-
-def SLAM_V2():
-    # Creazione della cartella per salvare le point cloud
-    output_folder = "pc_ak"
-    pointcloud_files = glob.glob(output_folder + "/*.ply")
-
-    # Lista per salvare tutte le point cloud
-    pointclouds = []
-
-    for filename in pointcloud_files:
-        pcd = o3d.io.read_point_cloud(filename)
-        pointclouds.append(pcd)
-
-    print(f"Caricate {len(pointclouds)} point cloud.")
-
-    # Parametri
-    voxel_size = 0.1  # Aumentare il voxel size per velocizzare il processo
-
-    # Preprocessamento e registrazione delle point cloud
-    aligned_pointclouds = [pointclouds[0]]
-    current_transformation = np.identity(4)
-
-    for i in range(1, len(pointclouds)):
-        source = aligned_pointclouds[-1]
-        target = pointclouds[i]
-
-        source_down, source_fpfh = preprocess_point_cloud(source, voxel_size)
-        target_down, target_fpfh = preprocess_point_cloud(target, voxel_size)
-
-        print(f"Registrazione globale della point cloud {i}")
-        global_result = execute_global_registration(source_down, target_down,
-                                                    source_fpfh, target_fpfh, voxel_size)
-        print(f"Raffinamento della registrazione della point cloud {i}")
-        icp_result = refine_registration(source, target, global_result.transformation, voxel_size)
-
-        target.transform(icp_result.transformation)
-        aligned_pointclouds.append(target)
-
-    print("Allineamento completato.")
-
-    # Unisci tutte le point cloud allineate
-    combined_pcd = aligned_pointclouds[0]
-    for pcd in aligned_pointclouds[1:]:
-        combined_pcd += pcd
-
-    # Salva la point cloud combinata
-    o3d.io.write_point_cloud("combined_pointcloud.ply", combined_pcd)
-
-    print("Point cloud combinata salvata come combined_pointcloud.ply.")
-
-
-def run_loam(input_ply_files, output_directory):
-    # Percorsi degli eseguibili LOAM
-    loam_dir = "/home/mmt-ben/loam_velodyne/build/devel/lib/loam_velodyne/"
-    laserOdometry_executable = os.path.join(loam_dir, "laserOdometry")
-    laserMapping_executable = os.path.join(loam_dir, "laserMapping")
-    multiScanRegistration_executable = os.path.join(loam_dir, "multiScanRegistration")
-    transformMaintenance_executable = os.path.join(loam_dir, "transformMaintenance")
-
-    # Creazione directory di output
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
-
-    # Imposta l'ambiente ROS
-    ros_env = os.environ.copy()
-    ros_env["LD_LIBRARY_PATH"] = "/opt/ros/noetic/lib:" + ros_env.get("LD_LIBRARY_PATH", "")
-    ros_env["PYTHONPATH"] = "/opt/ros/noetic/lib/python3/dist-packages:" + ros_env.get("PYTHONPATH", "")
-    ros_env["CMAKE_PREFIX_PATH"] = "/opt/ros/noetic:" + ros_env.get("CMAKE_PREFIX_PATH", "")
-    ros_env["ROS_PACKAGE_PATH"] = "/opt/ros/noetic/share:" + ros_env.get("ROS_PACKAGE_PATH", "")
-
-    # Esecuzione di multiScanRegistration per ogni file PLY
-    for ply_file in input_ply_files:
-        output_file = os.path.join(output_directory, os.path.basename(ply_file).replace(".ply", ".pcd"))
-        print(f"Processing {ply_file} -> {output_file}")
-        subprocess.run([multiScanRegistration_executable, ply_file, output_file], env=ros_env)
-
-    # Esecuzione di laserOdometry
-    subprocess.run([laserOdometry_executable, output_directory], env=ros_env)
-
-    # Esecuzione di laserMapping
-    subprocess.run([laserMapping_executable, output_directory], env=ros_env)
-
-    # Esecuzione di transformMaintenance
-    subprocess.run([transformMaintenance_executable, output_directory], env=ros_env)
-
-
-def SLAM_V3():
-    # Lista di file PLY di input
-    input_ply_files = glob.glob("/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/pc_ak/*.ply")
-
-    # Directory di output
-    output_directory = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/loam_output"
-
-    # Esegui LOAM
-    run_loam(input_ply_files, output_directory)
 
 
 def load_and_preprocess_point_clouds(folder_path, voxel_size, min_neighbors=20, std_ratio=2.0, x_threshold=-1250):
@@ -639,8 +536,8 @@ def VISULA_SLAM():
 if __name__ == "__main__":
 
 
-    process_mkv_4_RGBD()
-    #process_mkv()
+    #process_mkv_4_RGBD()
+    process_mkv()
     #SLAM_V1()
     #SLAM_V2()ù
 

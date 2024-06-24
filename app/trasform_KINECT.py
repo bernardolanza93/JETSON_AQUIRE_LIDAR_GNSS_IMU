@@ -67,13 +67,16 @@ def plot_gnss_trajectory(json_file_path, scale_factor=100000):
          gnss_array])
 
     # Plotting the GNSS trajectory in local coordinates
-    plt.figure(figsize=(10, 8))
-    plt.plot(local_coordinates[:, 0], local_coordinates[:, 1], marker='o', linestyle='-', color='b')
-    plt.title('GNSS Trajectory in Local Coordinates')
-    plt.xlabel('X Coordinate')
-    plt.ylabel('Y Coordinate')
-    plt.grid(True)
-    plt.show()
+    SHOW_GNSS_TRJ = 0
+    if SHOW_GNSS_TRJ:
+        plt.figure(figsize=(10, 8))
+        plt.plot(local_coordinates[:, 0], local_coordinates[:, 1], marker='o', linestyle='-', color='b')
+        plt.title('GNSS Trajectory in Local Coordinates')
+        plt.xlabel('X Coordinate')
+        plt.ylabel('Y Coordinate')
+        plt.grid(True)
+
+        plt.show()
 
     return gnss_array, local_coordinates, reference_latitude, reference_longitude, scale_factor
 
@@ -139,30 +142,41 @@ def associate_pointclouds_with_gnss(pointcloud_dir, interp_lat, interp_lon, inte
 
     return pointcloud_files, transformation_matrices , dict_transformation
 
-
-def plot_pointcloud_translations(pre_icp_matrices, post_icp_matrices):
+def plot_pointcloud_translations(pre_icp_matrices, post_icp_matrices, third_icp_matrices=None):
     pre_translations = np.array([matrix[:2, 3] for matrix in pre_icp_matrices])
     pre_orientations = np.array([matrix[:2, 0] for matrix in pre_icp_matrices])
 
     post_translations = np.array([matrix[:2, 3] for matrix in post_icp_matrices])
     post_orientations = np.array([matrix[:2, 0] for matrix in post_icp_matrices])
 
-    # Plotting the pre-ICP translations and orientations
+    # Setup the plot
     plt.figure(figsize=(10, 8))
-    plt.scatter(pre_translations[:, 0], pre_translations[:, 1], marker='o', color='b', label='Pre-ICP', s=3)
+
+    # Plotting the pre-ICP translations and orientations
+    plt.scatter(pre_translations[:, 0], pre_translations[:, 1], marker='o', color='g', label='GNSS-IMU', s=5)
     for i in range(len(pre_translations)):
         if i % 30 == 0:
             plt.arrow(pre_translations[i, 0], pre_translations[i, 1], pre_orientations[i, 0], pre_orientations[i, 1],
-                      head_width=0.4, head_length=1.5, fc='b', ec='b')
+                      head_width=1, head_length=2, fc='g', ec='g')
 
     # Plotting the post-ICP translations and orientations
-    plt.scatter(post_translations[:, 0], post_translations[:, 1], marker='x', color='r', label='Post-ICP', s=3)
+    plt.scatter(post_translations[:, 0], post_translations[:, 1], marker='x', color='r', label='SLAM-ICP', s=3)
     for i in range(len(post_translations)):
         if i % 30 == 0:
-            plt.arrow(post_translations[i, 0], post_translations[i, 1], post_orientations[i, 0],
-                      post_orientations[i, 1],
-                      head_width=0.4, head_length=1.5, fc='r', ec='r')
+            plt.arrow(post_translations[i, 0], post_translations[i, 1], post_orientations[i, 0], post_orientations[i, 1],
+                      head_width=0.7, head_length=1.5, fc='r', ec='r')
 
+    # Plotting the third set of translations and orientations if provided
+    if third_icp_matrices is not None:
+        third_translations = np.array([matrix[:2, 3] for matrix in third_icp_matrices])
+        third_orientations = np.array([matrix[:2, 0] for matrix in third_icp_matrices])
+        plt.scatter(third_translations[:, 0], third_translations[:, 1], marker='^', color='b', label='Third Set', s=3)
+        for i in range(len(third_translations)):
+            if i % 30 == 0:
+                plt.arrow(third_translations[i, 0], third_translations[i, 1], third_orientations[i, 0], third_orientations[i, 1],
+                          head_width=0.4, head_length=1.1, fc='b', ec='b')
+
+    # Final plot settings
     plt.title('Point Cloud Translations and Orientations in Local Coordinates')
     plt.xlabel('X Coordinate')
     plt.ylabel('Y Coordinate')
