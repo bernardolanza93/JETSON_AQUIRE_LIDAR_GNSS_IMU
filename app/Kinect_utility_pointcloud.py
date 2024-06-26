@@ -149,6 +149,8 @@ def extract_and_visualize(playback, output_dir, timestamp_map, frame_map):
 
     frame_count = 0
 
+    points_rejected = []
+
     while True:
         try:
             capture = playback.get_next_capture()
@@ -191,6 +193,7 @@ def extract_and_visualize(playback, output_dir, timestamp_map, frame_map):
 
                     point_cloud_data = capture.depth_point_cloud
                     points = point_cloud_data.reshape(-1, 3)
+                    ini_len  =len(points)
                     points = points[np.isfinite(points).all(axis=1)]
                     capture._color = cv2.cvtColor(cv2.imdecode(capture.color, cv2.IMREAD_COLOR), cv2.COLOR_BGR2BGRA)
                     capture._color_format = pyk4a.ImageFormat.COLOR_BGRA32
@@ -200,6 +203,10 @@ def extract_and_visualize(playback, output_dir, timestamp_map, frame_map):
                     condition = (points[:, 0] < 1) & (points[:, 1] < 1) & (points[:, 2] < 1)
                     points = points[~condition]
                     colors = colors[~condition]
+                    rejected = ini_len-len(points)
+                    print("total:", ini_len, "rejected:", rejected)
+                    points_rejected.append(rejected)
+
                     #Create and save the point cloud
 
                     SAVE = 1
@@ -224,7 +231,7 @@ def extract_and_visualize(playback, output_dir, timestamp_map, frame_map):
 
                 frame_count += 1
                 print(f"Frame {frame_count} processed")
-
+    print("mean rejected ", np.mean(points_rejected))
     playback.close()
 
 

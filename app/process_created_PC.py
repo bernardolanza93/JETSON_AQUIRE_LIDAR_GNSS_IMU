@@ -14,14 +14,14 @@ from sklearn.decomposition import PCA
 folder_pc = "/home/mmt-ben/Documents/spheres"
 # Mappa dei raggi reali
 real_radius_map = {
-    "1": 0.12,
-    "2": 0.06,
+    "1": 0.097,
+    "2": 0.072,
     "3": 0.0485,
     "4": 0.0385,
     "5": 0.028,
     "6": 0.024
 }
-Percentile_limit = 95
+Percentile_limit = 90
 
 
 
@@ -332,15 +332,17 @@ for filename in ply_files:
     except ValueError as e:
         print(e)
 
-
 # Mappa dei colori con nomi personalizzati
-color_map = {'sv': ('red', 'Viametris'), 'sf': ('blue', 'KA double side'), 'sa': ('green', 'KA single view')}
+color_map = {'sv': ('#FF6347', 'Viametris'), 'sf': ('#4682B4', 'KA double side'), 'sa': ('#3CB371', 'KA single view')}
 colors = [color_map[ft][0] for ft in file_types]
 
 # Definiamo piccoli spostamenti per evitare sovrapposizioni
 shifts = {'sv': -0.0005, 'sf': 0, 'sa': 0.0005}
 
-plt.figure(figsize=(9, 6))
+# Impostazioni estetiche di seaborn
+sns.set(style="whitegrid")
+
+plt.figure(figsize=(7, 5))
 
 for ft in color_map.keys():
     indices = [i for i, x in enumerate(file_types) if x == ft]
@@ -349,17 +351,17 @@ for ft in color_map.keys():
     y_errors = np.array(uncertainties)[indices]
 
     # Plot della linea sottile e tratteggiata
-    plt.plot(x_values, y_values, color=color_map[ft][0], marker='.', linestyle='--', linewidth=0.5, label=color_map[ft][1])
+    plt.plot(x_values, y_values, color=color_map[ft][0], marker='.', linestyle='--', linewidth=1, label=color_map[ft][1])
 
     # Aggiungi barre di errore grosse e semi-trasparenti
-    plt.errorbar(x_values, y_values, yerr=y_errors, fmt='s', color=color_map[ft][0], ecolor=color_map[ft][0], elinewidth=3, capsize=8, alpha=0.5)
+    plt.errorbar(x_values, y_values, yerr=y_errors, fmt='o', color=color_map[ft][0], ecolor=color_map[ft][0], elinewidth=2, capsize=4, alpha=1)
 
-plt.axhline(0, color='y', linestyle='--', linewidth=1.0)
-plt.xlabel('Reference radius [m]')
-plt.ylabel('Offset/systematic error [m]')
-plt.title('Random and systematic components error of the measurements')
-plt.legend(title=r'95% C.I. $\sigma$:')
-plt.grid(True)
+plt.axhline(0, color='gray', linestyle='--', linewidth=1.5)
+plt.xlabel('Reference radius [m]', fontsize=14)
+plt.ylabel('Offset error [m]', fontsize=14)
+plt.title('Random and systematic error of the measurements', fontsize=16)
+plt.legend(title=r'95% C.I. $\sigma$:', fontsize=12, title_fontsize=14)
+plt.grid(True, linestyle='--', alpha=0.7)
 
 plt.tight_layout()
 plt.show()
@@ -377,40 +379,36 @@ plt.show()
 
 
 
+# Creating a color palette for the file types with custom names
+palette = {'sv': ('#FF6347', 'Viametris'), 'sf': ('#4682B4', 'KA double side'), 'sa': ('#3CB371', 'KA single view')}
 
+# Set seaborn aesthetics
+sns.set(style="whitegrid")
 
-
-
-# Creiamo una palette di colori per il tipo di file con nomi personalizzati
-palette = {'sv': ('red', 'Viametris'), 'sf': ('blue', 'KA double side'), 'sa': ('green', 'KA single view')}
-
-# Creiamo i subplots
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
-
-# Creazione di una mappa di colori per i file types
-colors = [palette[ft][0] for ft in file_types]
-
-# Plot della sfericità con linee di collegamento
+# Creating the first plot for Sphericity
+plt.figure(figsize=(8, 6))
 for file_type in palette.keys():
     indices = [i for i, ft in enumerate(file_types) if ft == file_type]
-    ax1.plot([real_radii[i] for i in indices], [sphericity[i] for i in indices], color=palette[file_type][0], marker='o', label=palette[file_type][1])
+    plt.plot([real_radii[i] for i in indices], [sphericity[i] for i in indices], color=palette[file_type][0], marker='o', linestyle='-', linewidth=2, markersize=8, label=palette[file_type][1])
 
-ax1.set_xlabel('Reference radius [m]')
-ax1.set_ylabel('Sphericity')
-ax1.set_title('Sphericity vs Real Radius')
-ax1.legend(title='Technique:')
-ax1.grid(True)
+plt.xlabel('Reference radius [m]', fontsize=14)
+plt.ylabel('Sphericity', fontsize=14)
+plt.title('Sphericity vs Real Radius', fontsize=16)
+plt.legend(title='Technique:', fontsize=12, title_fontsize=14)
+plt.grid(True, linestyle='--', alpha=0.7)
+plt.tight_layout()
+plt.show()
 
-# Plot della densità con linee di collegamento
+# Creating the second plot for Density
+plt.figure(figsize=(8, 6))
 for file_type in palette.keys():
     indices = [i for i, ft in enumerate(file_types) if ft == file_type]
-    ax2.plot([real_radii[i] for i in indices], [densities[i] for i in indices], color=palette[file_type][0], marker='o', label=palette[file_type][1])
+    plt.plot([real_radii[i] for i in indices], [densities[i] for i in indices], color=palette[file_type][0], marker='o', linestyle='-', linewidth=2, markersize=8, label=palette[file_type][1])
 
-ax2.set_xlabel('Reference radius [m]')
-ax2.set_ylabel('Density [points/\n$m^3$]')
-ax2.set_title('Density vs Real Radius')
-ax2.legend(title='Technique:')
-ax2.grid(True)
-
+plt.xlabel('Reference radius [m]', fontsize=14)
+plt.ylabel('Density [points/$m^3$]', fontsize=14)
+plt.title('Density vs Real Radius', fontsize=16)
+plt.legend(title='Technique:', fontsize=12, title_fontsize=14)
+plt.grid(True, linestyle='--', alpha=0.7)
 plt.tight_layout()
 plt.show()
