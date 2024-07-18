@@ -262,28 +262,7 @@ def process_mkv_4_RGBD():
     playback.close()
 
 
-def process_mkv():
-    """
-     Main function to handle directory setup and initiate processing of MKV files.
-     """
-    input_file = '/home/mmt-ben/Downloads/20240531_120721.mkv'  # Path to the MKV file
-    timestamp_file = "/home/mmt-ben/Downloads/20240531_120721_timestamps.csv"  # Path to the timestamp conversion file
-    output_dir = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/pc_ak"  # Directory to save the results
 
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(os.path.join(output_dir, 'img'), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, 'pc'), exist_ok=True)
-
-    timestamp_map, frame_map = load_timestamp_conversion(timestamp_file)
-
-    playback = PyK4APlayback(input_file)
-    playback.open()
-
-
-
-    extract_and_visualize(playback, os.path.join(output_dir, 'pc'), timestamp_map, frame_map)
-
-    playback.close()
 
 def pairwise_registration(source, target):
     source.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
@@ -374,19 +353,6 @@ def apply_icp_incremental(pcds, threshold=0.02, show_visualization=False):
             print(f"Iteration {i}: Showing combined point cloud")
             o3d.visualization.draw_geometries([pcd_combined])
     return pcd_combined, transformation_matrices
-
-
-def SLAM_V4():
-    folder_path = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/pc_ak/pc"
-    #folder_path = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/pc_zed_reg"
-
-    voxel_size = 0.001  # Dimensione del voxel per il downsampling
-    min_neighbors = 80  # Numero minimo di vicini per mantenere un punto
-    std_ratio = 0.8  # Rapporto di deviazione standard per il filtraggio statistico
-    show_visualization = True  # Imposta su False per disabilitare la visualizzazione
-    pcds = load_and_preprocess_point_clouds(folder_path, voxel_size, min_neighbors, std_ratio)
-    combined_pcd, transformations = apply_icp_incremental(pcds)
-    o3d.io.write_point_cloud("combined_kinect_point_cloud.ply", combined_pcd)
 
 
 def load_images(rgb_folder, depth_folder, skip_start=2200, skip_end=2600):
@@ -537,6 +503,29 @@ def VISULA_SLAM():
 
 
 
+def process_mkv():
+    """
+     Main function to handle directory setup and initiate processing of MKV files.
+     """
+    input_file = '/home/mmt-ben/Downloads/20240531_120721.mkv'  # Path to the MKV file
+    timestamp_file = "/home/mmt-ben/Downloads/20240531_120721_timestamps.csv"  # Path to the timestamp conversion file
+    output_dir = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/pc_ak"  # Directory to save the results
+
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'img'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'pc'), exist_ok=True)
+
+    timestamp_map, frame_map = load_timestamp_conversion(timestamp_file)
+
+    playback = PyK4APlayback(input_file)
+    playback.open()
+
+
+
+    extract_and_visualize(playback, os.path.join(output_dir, 'pc'), timestamp_map, frame_map)
+
+    playback.close()
+
 
 
 
@@ -546,7 +535,7 @@ if __name__ == "__main__":
     #process_mkv_4_RGBD()
     process_mkv()
     #SLAM_V1()
-    #SLAM_V2()ù
+    #SLAM_V2()
 
 
 
