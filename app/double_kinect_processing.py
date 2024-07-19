@@ -151,17 +151,25 @@ def get_timestamp(file_name):
 
 
 if __name__ == "__main__":
-    KA_PREPROC.process_mkv()
+
+    input_file_mkv_1 =""
+    input_file_mkv_2= ""
+    output_folder_pc_1 = ""
+    output_folder_pc_2 = ""
+    start_index_1 = 0
+    start_index_2 = 0
+    timestamp_conversion_file_1 = ""
+    timestamp_conversion_file_2 = ""
+
+
+    KA_PREPROC.process_mkv(input_file_mkv_1,output_folder_pc_1,start_index_1,timestamp_conversion_file_1)
+    KA_PREPROC.process_mkv(input_file_mkv_2,output_folder_pc_2,start_index_2,timestamp_conversion_file_2)
+
     # TODO check if there is pc file in the destination folder
     # optionally extract and check the trajectory from gnss/imu fused (plot)
     # the goal is to have a fused traj interpolated with pointcloud timestamps
-    #
 
 
-
-
-    # TODO take pairs of pointcloud from two folder, trasform and register in accrod wwith the rigid trasformation
-    #  and then peorform ICP to fuse upper and lower PC
 
     pointcloud_dir = '/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/pc_ak/pc'
     pointcloud_files = [f for f in os.listdir(pointcloud_dir) if f.endswith('.ply')]
@@ -187,6 +195,15 @@ if __name__ == "__main__":
         pcd = remove_isolated_points(pcd_raw)
         pcd_m = convert_to_meters(pcd)
         pointclouds.append(pcd_m)
+
+
+
+
+    # define the initial trasformation between the upper and lower kinect
+    # zippa le coppie di pointcloud basandoti sul loro timestamp
+    # TODO take pairs of pointcloud from two folder, trasform and register in accrod wwith the rigid trasformation
+    # and then peorform ICP to fuse upper and lower PC
+    # salvale in una terzo folder da cui poi le ripescherai
 
     fused = hierarchy_slam_icp(pointclouds)
     save_pointcloud(fused, "fusedrow.ply")

@@ -29,17 +29,13 @@ def load_k4a_library():
     return k4a
 
 
-def process_mkv():
+def process_mkv(input_file, output_dir, start_index, timestamp_file):
     """
      Main function to handle directory setup and initiate processing of MKV files.
      """
-    input_file = '/home/mmt-ben/Downloads/20240531_120721.mkv'  # Path to the MKV file
-    timestamp_file = "/home/mmt-ben/Downloads/20240531_120721_timestamps.csv"  # Path to the timestamp conversion file
-    output_dir = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/pc_ak"  # Directory to save the results
 
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(os.path.join(output_dir, 'img'), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, 'pc'), exist_ok=True)
+
 
     timestamp_map, frame_map = load_timestamp_conversion(timestamp_file)
 
@@ -48,7 +44,7 @@ def process_mkv():
 
 
 
-    extract_and_visualize(playback, os.path.join(output_dir, 'pc'), timestamp_map, frame_map)
+    extract_and_visualize(playback, output_dir, timestamp_map, frame_map, start_index)
 
     playback.close()
 
@@ -60,7 +56,7 @@ def load_timestamp_conversion(file_path):
     return timestamp_map, frame_map
 
 
-def extract_and_visualize(playback, output_dir, timestamp_map, frame_map):
+def extract_and_visualize(playback, output_dir, timestamp_map, frame_map, start_index):
 
     frame_count = 0
 
@@ -104,7 +100,7 @@ def extract_and_visualize(playback, output_dir, timestamp_map, frame_map):
 
 
 
-                if frame_count > INITIAL_LIMIT:
+                if frame_count > start_index:
 
                     point_cloud_data = capture.depth_point_cloud
                     points = point_cloud_data.reshape(-1, 3)
