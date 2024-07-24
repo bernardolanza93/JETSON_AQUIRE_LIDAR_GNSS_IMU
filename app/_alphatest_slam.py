@@ -489,7 +489,7 @@ def create_transformed_plane(x_shift=0.0, y_shift=0.0, z_shift=0.0, rotation_ang
 
 # Funzione per eseguire ICP con Open3D
 def icp_open3d(source, target, initial_transformation=np.eye(4), max_iterations=250):
-    threshold = 0.05  # Soglia di distanza per ICP
+    threshold = 0.001  # Soglia di distanza per ICP
     icp_result = o3d.pipelines.registration.registration_icp(
         source, target, threshold, initial_transformation,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(),
