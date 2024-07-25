@@ -10,6 +10,7 @@ import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 from SLAM_V1_decoder_to_map import *
+import  math
 
 import sys
 import matplotlib.pyplot as plt
@@ -23,6 +24,7 @@ import rosbag
 import sensor_msgs.point_cloud2 as pc2
 import numpy as np
 import open3d as o3d
+import re
 import os
 from scipy.spatial.transform import Rotation as R
 import numpy as np
@@ -135,24 +137,55 @@ def alpha_version_main_list_topic_read_bag_generic_file():
 # Function to extract and display images from the bag file
 
 
-def extract_and_save_gnss_data(bag_file, topic_gnss="/GNSS", output_file="gnss_data.json"):
+def extract_and_save_gnss_data(bag_file, topic_gnss="/GNSS", output_file="app/localization_data/gnss_data.json"):
     gnss_data = []
 
-    gg = 0
+    def latlon_to_ecef(lat, lon, alt):
+        # WGS-84 ellipsiod parameters
+        a = 6378137.0  # semi-major axis
+        f = 1 / 298.257223563  # flattening
+        e2 = 2 * f - f ** 2  # square of eccentricity
+
+        lat_rad = math.radians(lat)
+        lon_rad = math.radians(lon)
+
+        N = a / math.sqrt(1 - e2 * math.sin(lat_rad) ** 2)
+
+        x = (N + alt) * math.cos(lat_rad) * math.cos(lon_rad)
+        y = (N + alt) * math.cos(lat_rad) * math.sin(lon_rad)
+        z = (N * (1 - e2) + alt) * math.sin(lat_rad)
+
+        return x, y, z
+
     with rosbag.Bag(bag_file, 'r') as bag:
         for topic, msg, t in bag.read_messages(topics=[topic_gnss]):
-            print(msg)
-            gg += 1
-            gnss_entry = {
-                'timestamp': t.to_sec(),
-                'data': msg.data
-            }
-            gnss_data.append(gnss_entry)
-            print("gnss extraction:", gg)
+            # Extract data from the GNSS message
+            match = re.match(r".*GNGGA,(\d{6}\.\d{2}),(\d{2})(\d{2}\.\d+),([NS]),(\d{3})(\d{2}\.\d+),([EW]),.*",
+                             msg.data)
+            if match:
+                time_gnss = match.group(1)
+                lat_deg = float(match.group(2)) + float(match.group(3)) / 60.0
+                if match.group(4) == 'S':
+                    lat_deg = -lat_deg
+                lon_deg = float(match.group(5)) + float(match.group(6)) / 60.0
+                if match.group(7) == 'W':
+                    lon_deg = -lon_deg
+                alt = float(re.search(r",(\d+\.\d+),M,", msg.data).group(1))
+
+                x, y, z = latlon_to_ecef(lat_deg, lon_deg, alt)
+
+                gnss_entry = {
+                    'timestamp': t.to_sec(),
+                    'position': {
+                        'x': x,
+                        'y': y,
+                        'z': z
+                    }
+                }
+                gnss_data.append(gnss_entry)
 
     with open(output_file, 'w') as f:
-        json.dump(gnss_data, f)
-
+        json.dump(gnss_data, f, indent=4)
 def save_pointclouds_with_poses(pointclouds, poses, output_dir='results'):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -237,15 +270,59 @@ def extract_dump_imu_orientation(bag_file, topic_gnss="/imu/data", output_file="
 
     with open(output_file, 'w') as f:
         json.dump(imu_data, f, indent=4)
+
+
+def save_imu_kinecct_to_file(bag_file, topic_imu = "/imu/data", output_json="app/localization_data/imu_data.json"):
+    # Dictionary to hold all the accelerometer data
+    imu_data = {}
+
+    # Open the bag file and read messages
+    with rosbag.Bag(bag_file, 'r') as bag:
+        for topic, msg, t in bag.read_messages(topics=[topic_imu]):
+            # Extract the timestamp
+            timestamp = f"{msg.header.stamp.secs}.{msg.header.stamp.nsecs}"
+
+            # Extract the IMU data
+            data = {
+                "orientation": {
+                    "x": msg.orientation.x,
+                    "y": msg.orientation.y,
+                    "z": msg.orientation.z,
+                    "w": msg.orientation.w
+                },
+                "angular_velocity": {
+                    "x": msg.angular_velocity.x,
+                    "y": msg.angular_velocity.y,
+                    "z": msg.angular_velocity.z
+                },
+                "linear_acceleration": {
+                    "x": msg.linear_acceleration.x,
+                    "y": msg.linear_acceleration.y,
+                    "z": msg.linear_acceleration.z
+                }
+            }
+
+            # Add the data to the dictionary with the timestamp as the key
+            imu_data[timestamp] = data
+
+
+    # Save the data to a JSON file
+    with open(output_json, 'w') as file:
+        json.dump(imu_data, file, indent=4)
+
 if __name__ == "__main__":
 
     #main()
     #main_zed()
-    bag_file = "/home/mmt-ben/Downloads/20240531_120721.bag"
-
+    bag_file = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/imu_kinect_xsens/ka_20240716_113100.bag"
+    topic_imu  = "/imu/data"
 
     list_topics(bag_file)
-    extract_dump_imu_orientation(bag_file)
+
+    extract_and_save_gnss_data(bag_file)
+    save_imu_kinecct_to_file(bag_file)
+
+
 
     #extract_and_save_gnss_data(bag_file)
 

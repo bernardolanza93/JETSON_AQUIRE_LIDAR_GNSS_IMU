@@ -2,8 +2,10 @@ import numpy as np
 import os
 import open3d as o3d
 
-def icp_open3d(source, target, initial_transformation=np.eye(4), max_iterations=200):
-    threshold = 0.05  # Soglia di distanza per ICP
+def icp_open3d(source, target, threshold = 0.1 , max_iterations=250):
+    initial_transformation = np.eye(4)
+
+    # Soglia di distanza per ICP
     icp_result = o3d.pipelines.registration.registration_icp(
         source, target, threshold, initial_transformation,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(),

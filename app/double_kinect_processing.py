@@ -17,6 +17,70 @@ import matrix_utilities as MATRIX_UTILS
 import PREPROC_double_KA as KA_PREPROC
 import re
 import sys
+from decorator import *
+
+
+def plot_trajectory_3d(timestamp_dict):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Ordina i timestamp
+    sorted_timestamps = sorted(timestamp_dict.keys())
+
+    # Inizializza la posizione iniziale (matrice identità)
+    current_position = np.eye(4)
+
+    # Liste per memorizzare le coordinate x, y, z
+    x = [current_position[0, 3]]
+    y = [current_position[1, 3]]
+    z = [current_position[2, 3]]
+
+    # Applica le trasformazioni in ordine di timestamp
+    for ts in sorted_timestamps:
+        transform = timestamp_dict[ts]
+        current_position = np.dot(current_position, transform)
+        x.append(current_position[0, 3])
+        y.append(current_position[1, 3])
+        z.append(current_position[2, 3])
+
+    # Plotta la traiettoria 3D
+    ax.plot(x, y, z, marker='o', linewidth=0.2)
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title('Trajectory 3D Plot')
+
+    # Assicura che gli assi abbiano la stessa scala
+    ax.set_aspect('auto')
+    max_range = np.array([max(x)-min(x), max(y)-min(y), max(z)-min(z)]).max()
+    mid_x = (max(x) + min(x)) * 0.5
+    mid_y = (max(y) + min(y)) * 0.5
+    mid_z = (max(z) + min(z)) * 0.5
+    ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
+    ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
+    ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
+
+    plt.show()
+
+def downsample_point_cloud(point_cloud, voxel_size):
+    """
+    Downsample a point cloud using a voxel grid filter and remove duplicated points.
+
+    Parameters:
+        point_cloud (o3d.geometry.PointCloud): The input point cloud.
+        voxel_size (float): The voxel size for downsampling.
+
+    Returns:
+        o3d.geometry.PointCloud: The downsampled point cloud.
+    """
+    # Downsample the point cloud using voxel grid filter
+    downsampled_pc = point_cloud.voxel_down_sample(voxel_size)
+
+    # Remove duplicate points
+    downsampled_pc = downsampled_pc.remove_duplicated_points()
+
+    return downsampled_pc
 
 
 def get_sorted_filenames_by_timestamp(directory):
@@ -31,16 +95,18 @@ def get_sorted_filenames_by_timestamp(directory):
     sorted_filenames = [x[0] for x in files_with_timestamps]
     return sorted_filenames
 
-def visualize_pc(pc):
-    point_size = 1
+def visualize_pc(pc, title):
+    point_size = 2
     vis = o3d.visualization.Visualizer()
-    vis.create_window(window_name='Merged Point Cloud A')
+    vis.create_window(window_name=title)
 
     # Aggiungi le geometrie una alla volta
     vis.add_geometry(pc)
 
 
     opt = vis.get_render_option()
+    # Imposta il colore di sfondo (colore RGB normalizzato)
+    opt.background_color = np.array([0.1, 0.1, 0.1])  # Colore nero
     opt.point_size = point_size
     vis.run()
     vis.destroy_window()
@@ -286,13 +352,13 @@ def convert_to_meters(pcd):
     pcd.points = o3d.utility.Vector3dVector(points)
     return pcd
 
-def remove_isolated_points(pcd, nb_neighbors=10, radius=500):
+def remove_isolated_points(pcd, nb_neighbors=10, radius=500.0):
     cl, ind = pcd.remove_radius_outlier(nb_points=nb_neighbors, radius=radius)
     pcd_cleaned = pcd.select_by_index(ind)
     return pcd_cleaned
 
-
-def hierarchy_slam_icp(input_all_pointcloud): #100
+@timeit
+def hierarchy_slam_icp(input_all_pointcloud,timestamp_sorted):
 
     # devo saltare la zero che è solo target
     # prendo la sua trasformata trovata tra le sotto pc e la applico alla coppia dopo
@@ -316,15 +382,12 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
 
     last_epoch_trasformation = [np.eye(4) for _ in range(len(input_all_pointcloud))]
     x_y = []
+    timestamp_dict = {}
 
     while len(epoch_start_pointclouds) > 1:
+        start_time = time.time()
         epoch += 1
-
-
         i = 1
-
-
-        dict_analysis ={}
 
         new_halfed_pointcloud = []
         trasformation_current = []
@@ -342,6 +405,8 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
 
             #TOGLILO
             if i > 0:
+
+                #print(i, end=" ")
 
                 initial_trasform_from_last_epoch_1_couple = (last_epoch_trasformation[i-1])
                 initial_trasform_from_last_epoch_2_couple = (last_epoch_trasformation[i])
@@ -363,9 +428,50 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
                 current_source.transform(initial_trasform_from_last_epoch_1_couple)
 
                 target =  epoch_start_pointclouds[i-1]
-                updated_trasform_icp_result = CUSTOM_SLAM.icp_open3d(current_source, target)
+
+
+                VOXEL_VOLUME = 0.04
+                current_source = downsample_point_cloud(current_source, VOXEL_VOLUME)
+                target = downsample_point_cloud(target, VOXEL_VOLUME)
+
+
+
+
+                SHOW_ICP_PROCESS = 0
+                if SHOW_ICP_PROCESS:
+                    if len(current_source.points) < 600 or len(target.points) < 600:
+                        target = remove_isolated_points(target, nb_neighbors=12, radius=0.7)
+                        current_source = remove_isolated_points(current_source, nb_neighbors=12, radius=0.8)
+
+                    yellow = np.array([1, 1, 0])
+                    red =  np.array([1, 0, 0])
+                    green = np.array([0, 1, 0])
+                    blue = np.array([0, 0, 1])
+
+                    # print("source",len(current_source.points))
+                    # print("target", len(target.points))
+                    if len(current_source.points) < 600 or len(target.points) < 600:
+                        target = remove_isolated_points(target, nb_neighbors=12, radius=0.7)
+                        current_source = remove_isolated_points(current_source, nb_neighbors=12, radius=0.8)
+
+                    current_source.colors = o3d.utility.Vector3dVector(np.tile(yellow, (len(current_source.points), 1)))
+                    target.colors = o3d.utility.Vector3dVector(np.tile(red, (len(target.points), 1)))
+                    pre_icp = target + current_source
+                    visualize_pc(pre_icp, "pre icp")
+
+                    # Imposta tutti i punti al colore bianco (RGB: [1, 1, 1])
+                    white = np.array([1, 1, 1])
+                    current_source.colors = o3d.utility.Vector3dVector(np.tile(green, (len(current_source.points), 1)))
+                    target.colors = o3d.utility.Vector3dVector(np.tile(blue, (len(target.points), 1)))
+
+
+
+
+
+
+                updated_trasform_icp_result = CUSTOM_SLAM.icp_open3d(current_source, target, 0.05, 200)
                 #Total trasformation : current, plus the prrevious frame trasf:
-                x_y.append(updated_trasform_icp_result[0, -2:])
+                x_y.append(updated_trasform_icp_result[0, -3:])
                 total_trasformation_prior_plus_icp = np.dot(prior_trasformation_composed, updated_trasform_icp_result)
 
 
@@ -375,33 +481,47 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
                 if len(epoch_start_pointclouds) == 2:
                     print(updated_trasform_icp_result)
 
-                    #pre_icp  = target + current_source
-                    #visualize_pc(pre_icp)
-                    #visualize_pc(target)
+                    # pre_icp  = target + current_source
+                    # visualize_pc(pre_icp, "pre icp")
+
 
                 merged_pcd = target + trasformed_icp_source
+
+
+
+
+
+                if SHOW_ICP_PROCESS:
+                    visualize_pc(merged_pcd, "merged")
+                    current_source.colors = o3d.utility.Vector3dVector(np.tile(white, (len(current_source.points), 1)))
+                    target.colors = o3d.utility.Vector3dVector(np.tile(white, (len(target.points), 1)))
+
+
 
                 # Controllo se esiste una point cloud precedente e successiva
                 # Controllo se esiste una point cloud precedente e successiva
 
                 PREVIOUS_ADDICTION = 0
                 if PREVIOUS_ADDICTION:
+                    #all inizio non ha senso usarlo perche la percentuale di sovrapposizione è alta
+                    if epoch > 4:
+                        if i - 2 >= 0:
+                            previous_pc = epoch_start_pointclouds[i - 2]
+                            initial_transform_previous_1 = last_epoch_trasformation[i - 2]
+                            initial_transform_previous_2 = last_epoch_trasformation[i - 1]
+                            prior_transform_composed_previous = np.dot(initial_transform_previous_1,
+                                                                       initial_transform_previous_2)
 
-                    if i - 2 >= 0:
-                        previous_pc = epoch_start_pointclouds[i - 2]
-                        initial_transform_previous_1 = last_epoch_trasformation[i - 2]
-                        initial_transform_previous_2 = last_epoch_trasformation[i - 1]
-                        prior_transform_composed_previous = np.dot(initial_transform_previous_1,
-                                                                   initial_transform_previous_2)
-                        # Trasformare la merged_pcd
-                        merged_pcd.transform(prior_transform_composed_previous)
-                        # Eseguire ICP per allineare merged_pcd con previous_pc
-                        previous_pc_transformed = o3d.geometry.PointCloud(previous_pc)
-                        updated_transform_icp_result_previous = CUSTOM_SLAM.icp_open3d(merged_pcd, previous_pc_transformed)
+                            #COME AGGIORNATO BASTA UNA SOLA TRASFORMAZIONE
+                            # Trasformare la merged_pcd
+                            merged_pcd.transform(initial_transform_previous_1)
+                            # Eseguire ICP per allineare merged_pcd con previous_pc
+                            previous_pc_transformed = o3d.geometry.PointCloud(previous_pc)
+                            updated_transform_icp_result_previous = CUSTOM_SLAM.icp_open3d(merged_pcd, previous_pc_transformed)
 
-                        # Correggere merged_pcd con la trasformazione ICP trovata
-                        merged_pcd.transform(updated_transform_icp_result_previous)
-                        merged_pcd += previous_pc_transformed
+                            # Correggere merged_pcd con la trasformazione ICP trovata
+                            merged_pcd.transform(updated_transform_icp_result_previous)
+                            merged_pcd += previous_pc_transformed
 
                 NEXT_ADDITION = 0
                 if NEXT_ADDITION:
@@ -409,6 +529,9 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
 
                     if i + 1 < len(epoch_start_pointclouds):
                         next_pc = epoch_start_pointclouds[i + 1]
+
+
+                        #COME AGGIORNATO INVECE CHE 2 NE BASTA UNA INVECE CHE 6 NE BASTANO 3
 
                         # Coppia di trasformazioni per unire la previous
                         transform_previous_1 = last_epoch_trasformation[i - 2]
@@ -426,8 +549,8 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
                         transform_composed_next = np.dot(transform_next_1, transform_next_2)
 
                         # Combinare tutte le trasformazioni
-                        combined_transform = np.dot(transform_composed_previous, transform_composed_current)
-                        combined_transform = np.dot(combined_transform, transform_composed_next)
+                        combined_transform = np.dot(transform_previous_1, transform_current_1)
+                        combined_transform = np.dot(combined_transform, transform_next_1)
 
                         # Trasformare la merged_pcd con le trasformazioni combinate
                         next_pc.transform(combined_transform)
@@ -440,36 +563,8 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
                         next_pc_transformed.transform(transform_icp_result_next)
                         merged_pcd += next_pc_transformed
 
-                #A QUESTO PUNTO CONTROLLO SE HO UNA PC PRIMA E DOPO,
-                #se una delle due manca ( estremi ) ne prenderò solo una, alla fine potrebbe capitare che avendone troppo poche manchino netrmbi (ie quando ho solo 2PC)
-                # in questo caso lascierò perdere questa ultiriore fusione dei nuovi estremi
 
-                # l ARREY CHE CONTORLLO È IL SEGUNETE:  epoch_start_pointclouds
-                #TARGET E SOURCE SONO RISPETTIVAMENTE i-1 E i
-                # i nuovi estremi sono i-2 (previous_pc) e i + 1 (next_pc)
-                # dopo
-                # SE LE HO DEFINISCO COME POSIZIONARLE TRAMITRE MATRICI :
-                # per la pointcloud precedente deovrò posizionarla come avrei fatto nell iterazione prima (e aggiungerla poi a merged Pc dopo che ho fatto icp)
-                # per la seguente come avrei fatto per l iterazione dopo.
-                #FACCIO ICP E LE FONDO TUTTE E 4,
-                # quaale trasformazione prendo : per quella prima: usiamo un sistema sinistroso quindi quella prima parte sempre da zero, in questo caso sposto la merged pc appena ottenuta
-                # la sposto
-                #in pratica sposto la merged come ho gia spostato la source nell iterazione precedente
-                #ovvero usando : (la merged ora si comporta come la source della precedente) quindi vado ad usaree :              initial_trasform_from_last_epoch_1_couple_previous = (last_epoch_trasformation[i-2])
-                #initial_trasform_from_last_epoch_2_couple_previous = (last_epoch_trasformation[i-1])
-                # prior_trasformation_composed_previous = np.dot(initial_trasform_from_last_epoch_1_couple, initial_trasform_from_last_epoch_2_couple)
-
-                # poi facciamo icp, e trasformiamo anche con icp,
-                #a  questo punto prendiamo la segunete, merged + previous sono all origine, traslo la next con la matrice specifica, faccio icp,, e traslo con risultati icp
-                # traslo semplicemente la source (considerando la merged come target) come avrei fatto nell epoca successiva (e che farò)
-                # initial_trasform_from_last_epoch_1_couple_next = (last_epoch_trasformation[i])
-                # initial_trasform_from_last_epoch_2_couple_next = (last_epoch_trasformation[i+1])
-                #prior_trasformation_composed = np.dot(initial_trasform_from_last_epoch_1_couple, initial_trasform_from_last_epoch_2_couple)
-                # ora faccio icp e poi fondo devo ricordarmi di fondere anche con il previous che aveo attaccato prima non solo con la merge
-                # infine fondo anche la next.
-                # ora invece di un doppia ho una quadrupla
-
-                # poi salvo solo le info delle due pc centrali non contando le aggiunte che ho fatto nell ambito trasformate (perche una in realta l ho gia computata prima e una la computerò adesso)
+                merged_pcd = remove_isolated_points(merged_pcd, nb_neighbors=12, radius=0.4)
                 trasformation_current.append(total_trasformation_prior_plus_icp)
                 new_halfed_pointcloud.append(merged_pcd)
 
@@ -490,44 +585,29 @@ def hierarchy_slam_icp(input_all_pointcloud): #100
                     trasformation_current.append(last_trasaform)
                     new_halfed_pointcloud.append(last_pc)
 
+                timestamp_index = i // 2 if epoch == 1 else len(timestamp_sorted) // (2 ** (epoch - 1)) + i // 2
+                timestamp_dict[timestamp_sorted[timestamp_index]] = updated_trasform_icp_result
+
             i += 2
 
 
         epoch_start_pointclouds = new_halfed_pointcloud
         last_epoch_trasformation = trasformation_current
-        print(f"Computed Epoch {epoch}, PCs created:{len(new_halfed_pointcloud)}, trasformation = {len(trasformation_current)} ")
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        elapsed_time_ms = round(elapsed_time, 3)
+        print(f"Computed Epoch {epoch} in {elapsed_time_ms} s, PCs and T created:{len(new_halfed_pointcloud)}")
 
-        dict_analysis[epoch] = [trasformation_current , new_halfed_pointcloud]
 
     # Estraiamo i valori di x e y
     x_values = [item[0] for item in x_y]
     y_values = [item[1] for item in x_y]
+    z_values = [item[2] for item in x_y]
 
-    # Creiamo un array di istanti di tempo (può essere una semplice sequenza numerica)
-    time_instants = np.arange(len(x_y))
 
-    # Creiamo il grafico
-    plt.figure(figsize=(10, 5))
 
-    # Grafico di x vs istanti
-    plt.subplot(1, 2, 1)
-    plt.plot(time_instants, x_values, marker='o', linestyle='-', color='b', label='x vs istanti')
-    plt.xlabel('Istanti di tempo')
-    plt.ylabel('x')
-    plt.title('x vs Istanti')
-    plt.legend()
 
-    # Grafico di y vs istanti
-    plt.subplot(1, 2, 2)
-    plt.plot(time_instants, y_values, marker='o', linestyle='-', color='r', label='y vs istanti')
-    plt.xlabel('Istanti di tempo')
-    plt.ylabel('y')
-    plt.title('y vs Istanti')
-    plt.legend()
-
-    # Mostra il grafico
-    plt.tight_layout()
-    plt.show()
+    plot_trajectory_3d(timestamp_dict)
 
 
     return new_halfed_pointcloud[0]
@@ -611,8 +691,10 @@ if 1:
     else:
         print("ERROR NO TIMESTAMP")
         pointcloud_files_sorted = []
-    starts = 2900
-    ends = 3200
+
+    print("total PCs", len(pointcloud_files))
+    starts = 200
+    ends = 2000
     timestamp_sorted = []
     pointclouds = []
     for idx, file_name in enumerate(pointcloud_files_sorted):
@@ -620,22 +702,23 @@ if 1:
 
         timestamp_str = file_name.split('_')[1].split('.ply')[0]
         timestamp = float(timestamp_str)
-        timestamp_sorted.append(timestamp)
+
         if idx > starts and idx < ends:
             pcd_raw = o3d.io.read_point_cloud(
                 os.path.join(coupled_saving_folder, file_name))  # Usa file_name invece di pointcloud_files[idx]
             pcd_raw = convert_to_meters(pcd_raw)
 
             pointclouds.append(pcd_raw)
+            timestamp_sorted.append(timestamp)
 
 
 
-    fused = hierarchy_slam_icp(pointclouds)
+    fused = hierarchy_slam_icp(pointclouds,timestamp_sorted)
     filename = "output_double/fused.ply"
     o3d.io.write_point_cloud(filename, fused)
     print(f"PointCloud salvata come {filename}")
 
 
-    visualize_pc(fused)
+    visualize_pc(fused,"end")
 
     sys.exit()
