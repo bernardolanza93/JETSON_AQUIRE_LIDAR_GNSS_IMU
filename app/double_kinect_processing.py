@@ -18,6 +18,7 @@ import PREPROC_double_KA as KA_PREPROC
 import re
 import sys
 from decorator import *
+import localization_proc as LOCALIZE
 
 
 def plot_trajectory_3d(timestamp_dict):
@@ -430,10 +431,9 @@ def hierarchy_slam_icp(input_all_pointcloud,timestamp_sorted):
                 target =  epoch_start_pointclouds[i-1]
 
 
-                VOXEL_VOLUME = 0.04
+                VOXEL_VOLUME = 0.03
                 current_source = downsample_point_cloud(current_source, VOXEL_VOLUME)
                 target = downsample_point_cloud(target, VOXEL_VOLUME)
-
 
 
 
@@ -634,6 +634,35 @@ if 1:
     coupled_saving_folder = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/output_double/coupled_saved"
 
 
+    LOCALIZE_ACQUISITION = 1
+    if LOCALIZE_ACQUISITION:
+        imu_file = '/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/localization_data/imu_data.json'
+        gnss_data = LOCALIZE.load_json('/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/localization_data/gnss_data.json')
+        imu_data = LOCALIZE.load_json(imu_file)
+
+        # Interpolate GNSS data for IMU timestamps
+        interpolated_gnss_data = LOCALIZE.interpolate_gnss_for_imu(gnss_data, imu_data)
+        LOCALIZE.plot_gnss_data(interpolated_gnss_data)
+
+        timestamps, trajectory, linear_accelerations, global_accelerations, rotations = LOCALIZE.process_imu_data(imu_file)
+
+        # Plot the translations
+
+
+        # Plot the linear accelerations
+        # LOCALIZE.plot_accelerations(timestamps, linear_accelerations)
+        # LOCALIZE.plot_accelerations(timestamps, global_accelerations)
+        # LOCALIZE.plot_accelerations_and_rotations(timestamps, linear_accelerations, rotations)
+        # LOCALIZE.plot_accelerations_and_rotations(timestamps, global_accelerations,rotations)
+
+        # # Plot the rotations
+        # LOCALIZE.plot_rotations(timestamps, rotations)
+
+        # Plot the 3D trajectory
+        LOCALIZE.plot_trajectory_3d_imuu(timestamps, trajectory)
+        sys.exit()
+
+
     SHOW_RGB_MKV = 0
     if SHOW_RGB_MKV:
 
@@ -695,6 +724,8 @@ if 1:
     print("total PCs", len(pointcloud_files))
     starts = 200
     ends = 2000
+
+    print("analizing: S:", starts, " E:", ends, " TOT:", ends-starts)
     timestamp_sorted = []
     pointclouds = []
     for idx, file_name in enumerate(pointcloud_files_sorted):
