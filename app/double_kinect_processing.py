@@ -641,15 +641,19 @@ if 1:
         imu_data = LOCALIZE.load_json(imu_file)
 
         # Interpolate GNSS data for IMU timestamps
-        interpolated_gnss_data = LOCALIZE.interpolate_gnss_for_imu(gnss_data, imu_data)
+        interpolated_gnss_data , gnss_timestamps, trajectory_gnss = LOCALIZE.interpolate_gnss_for_imu(gnss_data, imu_data)
         LOCALIZE.plot_gnss_data(interpolated_gnss_data)
 
-        timestamps, trajectory, linear_accelerations, global_accelerations, rotations = LOCALIZE.process_imu_data(imu_file)
+        timestamps_imu, trajectory_imu, linear_accelerations, global_accelerations, rotations = LOCALIZE.process_imu_data(imu_file)
+
+        LOCALIZE.plot_translations_double_confront(gnss_timestamps, trajectory_gnss, timestamps_imu, trajectory_imu)
+
+
 
         # Plot the translations
 
 
-        # Plot the linear accelerations
+        # Plot the linear accelerationsa
         # LOCALIZE.plot_accelerations(timestamps, linear_accelerations)
         # LOCALIZE.plot_accelerations(timestamps, global_accelerations)
         # LOCALIZE.plot_accelerations_and_rotations(timestamps, linear_accelerations, rotations)
@@ -659,7 +663,7 @@ if 1:
         # LOCALIZE.plot_rotations(timestamps, rotations)
 
         # Plot the 3D trajectory
-        LOCALIZE.plot_trajectory_3d_imuu(timestamps, trajectory)
+        LOCALIZE.plot_trajectory_3d_imuu(timestamps_imu, trajectory_imu)
         sys.exit()
 
 

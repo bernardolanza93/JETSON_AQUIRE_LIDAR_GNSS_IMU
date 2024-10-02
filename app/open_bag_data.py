@@ -141,10 +141,10 @@ def extract_and_save_gnss_data(bag_file, topic_gnss="/GNSS", output_file="app/lo
     gnss_data = []
 
     def latlon_to_ecef(lat, lon, alt):
-        # WGS-84 ellipsiod parameters
+        # Parametri dell'ellissoide WGS-84
         a = 6378137.0  # semi-major axis
         f = 1 / 298.257223563  # flattening
-        e2 = 2 * f - f ** 2  # square of eccentricity
+        e2 = 2 * f - f ** 2  # eccentricità al quadrato
 
         lat_rad = math.radians(lat)
         lon_rad = math.radians(lon)
@@ -157,9 +157,38 @@ def extract_and_save_gnss_data(bag_file, topic_gnss="/GNSS", output_file="app/lo
 
         return x, y, z
 
+    def ecef_to_enu(x, y, z, lat_ref, lon_ref, alt_ref):
+        # Conversione delle coordinate del punto di riferimento in ECEF
+        x_ref, y_ref, z_ref = latlon_to_ecef(lat_ref, lon_ref, alt_ref)
+
+        # Differenza tra le coordinate ECEF del punto e del punto di riferimento
+        dx = x - x_ref
+        dy = y - y_ref
+        dz = z - z_ref
+
+        # Conversione della latitudine e longitudine del riferimento in radianti
+        lat_ref_rad = math.radians(lat_ref)
+        lon_ref_rad = math.radians(lon_ref)
+
+        # Matrice di rotazione da ECEF a ENU
+        t_matrix = [
+            [-math.sin(lon_ref_rad), math.cos(lon_ref_rad), 0],
+            [-math.sin(lat_ref_rad) * math.cos(lon_ref_rad), -math.sin(lat_ref_rad) * math.sin(lon_ref_rad), math.cos(lat_ref_rad)],
+            [math.cos(lat_ref_rad) * math.cos(lon_ref_rad), math.cos(lat_ref_rad) * math.sin(lon_ref_rad), math.sin(lat_ref_rad)]
+        ]
+
+        # Moltiplicazione matrice-vettore per ottenere ENU
+        x_local = t_matrix[0][0] * dx + t_matrix[0][1] * dy + t_matrix[0][2] * dz
+        y_local = t_matrix[1][0] * dx + t_matrix[1][1] * dy + t_matrix[1][2] * dz
+        z_local = t_matrix[2][0] * dx + t_matrix[2][1] * dy + t_matrix[2][2] * dz
+
+        return x_local, y_local, z_local
+
+    lat_ref, lon_ref, alt_ref = None, None, None  # Punto di riferimento
+
     with rosbag.Bag(bag_file, 'r') as bag:
         for topic, msg, t in bag.read_messages(topics=[topic_gnss]):
-            # Extract data from the GNSS message
+            # Estrai dati dal messaggio GNSS
             match = re.match(r".*GNGGA,(\d{6}\.\d{2}),(\d{2})(\d{2}\.\d+),([NS]),(\d{3})(\d{2}\.\d+),([EW]),.*",
                              msg.data)
             if match:
@@ -174,18 +203,27 @@ def extract_and_save_gnss_data(bag_file, topic_gnss="/GNSS", output_file="app/lo
 
                 x, y, z = latlon_to_ecef(lat_deg, lon_deg, alt)
 
+                # Imposta il punto di riferimento (primo punto)
+                if lat_ref is None:
+                    lat_ref, lon_ref, alt_ref = lat_deg, lon_deg, alt
+
+                # Converti da ECEF a ENU e rinomina in x, y, z
+                x_local, y_local, z_local = ecef_to_enu(x, y, z, lat_ref, lon_ref, alt_ref)
+
                 gnss_entry = {
                     'timestamp': t.to_sec(),
                     'position': {
-                        'x': x,
-                        'y': y,
-                        'z': z
+                        'x': x_local,
+                        'y': y_local,
+                        'z': z_local
                     }
                 }
                 gnss_data.append(gnss_entry)
 
     with open(output_file, 'w') as f:
         json.dump(gnss_data, f, indent=4)
+
+
 def save_pointclouds_with_poses(pointclouds, poses, output_dir='results'):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -320,7 +358,7 @@ if __name__ == "__main__":
     list_topics(bag_file)
 
     extract_and_save_gnss_data(bag_file)
-    save_imu_kinecct_to_file(bag_file)
+    #save_imu_kinecct_to_file(bag_file)
 
 
 
