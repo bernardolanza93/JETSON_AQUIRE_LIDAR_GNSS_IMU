@@ -1,4 +1,6 @@
 import json
+import sys
+
 import numpy as np
 from scipy.interpolate import interp1d
 import matplotlib.pyplot as plt
@@ -420,7 +422,7 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
         velocity = initial_velocity + acc * dt
         return velocity
 
-    window_size = 50
+    window_size = 100
 
     # Parse JSON data
     with open(file_path) as f:
@@ -451,10 +453,10 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
     for timestamp, data in sorted(imu_data.items()):
         timestamp = float(timestamp)
-        orientation = [data['orientation']['w'],
-                       data['orientation']['x'],
+        orientation = [data['orientation']['x'],
                        data['orientation']['y'],
-                       data['orientation']['z']]  # Assumere ordine (x, y, z, w)
+                       data['orientation']['z'],
+                       data['orientation']['w']]  # Assumere ordine (x, y, z, w)
 
         linear_acceleration = np.array([data['linear_acceleration']['x'],
                                         data['linear_acceleration']['y'],
@@ -520,14 +522,21 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
     N = 10
     initial_gravity_vector = np.mean(filtered_accelerations[:N], axis=0)
+    print("initial gravity:", initial_gravity_vector)
 
     previous_rot_mat = euler_to_rotation_matrix(filtered_rotations[0], euler_order)
+
+    dt_under_evaluation = []
 
 
     # Iniziare l'integrazione usando solo i dati filtrati
     for timestamp, linear_acceleration, euler_angles, orientation in zip(filtered_timestamps, filtered_accelerations, filtered_rotations, filtered_quaternions):
+        if previous_timestamp is  None:
+            rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
+            initial_gravity_vector = transform_acceleration(linear_acceleration, rotation_matrix)
 
-        linear_acceleration = linear_acceleration - initial_gravity_vector
+
+            print("first frame")
 
 
 
@@ -535,30 +544,44 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
         if previous_timestamp is not None:
             rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
 
-            delta_rotation_matrix = np.dot(rotation_matrix, np.linalg.inv(previous_rot_mat))
+            # Creare un oggetto Rotation dal quaternione
+            #rotation = R.from_quat(orientation)
 
+            # Ottenere la matrice di rotazione 3x3
+            #rotation_matrix = rotation.as_matrix()
 
-            gravity_vector = rotate_gravity(initial_gravity_vector, delta_rotation_matrix)
-            #print(gravity_vector)
-            linear_acceleration = linear_acceleration - gravity_vector
-
+            # delta_rotation_matrix = np.dot(rotation_matrix, np.linalg.inv(previous_rot_mat))
+            #
+            #
+            # gravity_vector = rotate_gravity(initial_gravity_vector, rotation_matrix)
+            #
+            #
+            # #linear_acceleration = linear_acceleration - gravity_vector
 
 
 
             dt = timestamp - previous_timestamp
-            velocity = integrate(linear_acceleration, dt, initial_velocity)
+            #dt = 0.01
+            dt_under_evaluation.append(dt)
+            global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
+            global_acceleration_ng = global_acceleration - initial_gravity_vector
+
+
+            #global_velocity = transform_velocity(velocity, delta_rotation_matrix)
+
+            global_velocity = integrate(global_acceleration_ng, dt, initial_velocity)
 
             # Trasformare la velocità nel frame globale (rotazione sulla velocità, non sull'accelerazione)
-            global_velocity = transform_velocity(velocity, rotation_matrix)
+
             #global_velocity = velocity
-            global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
+
 
             #position = initial_position + global_velocity * dt + 0.5 * linear_acceleration * dt ** 2
-            position = initial_position + global_velocity * dt + 0.5 * global_acceleration * dt ** 2
+            position = initial_position + global_velocity * dt + 0.5 * global_acceleration_ng * dt ** 2
 
             trajectory.append(position)
             velocities.append(global_velocity)  # Salvare la velocità calcolata
-            global_accelerations.append(linear_acceleration)
+            global_accelerations.append(global_acceleration_ng)
 
 
             # 2. Metodo dei quaternioni
@@ -574,7 +597,7 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
 
             # Aggiornare lo stato per il prossimo ciclo
-            initial_velocity = velocity
+            initial_velocity = global_velocity
             initial_position = position
             previous_rot_mat = rotation_matrix
 
@@ -596,13 +619,14 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
     # print(len(filtered_rotations))
     # print(len(global_accelerations))
     # print(len(velocities))  # Mostra la lunghezza del vettore delle velocità
-    #plot_accelerations_and_rotations(raw_timestamps, raw_accelerations, raw_rotations, "RAW")
 
-    # plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations, "VELOCITY")
+
+
+    plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations, "VELOCITY")
     # plot_accelerations_and_rotations(filtered_timestamps, filtered_angular_velocities, filtered_rotations, "ANGULAR VELOCITY")
-
     #qplot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations, "filtered")
-    #plot_accelerations_and_rotations(filtered_timestamps, global_accelerations, filtered_rotations)
+    plot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations, "RAW ACC")
+    plot_accelerations_and_rotations(filtered_timestamps, global_accelerations, filtered_rotations, "GLOBAL ACC")
     #plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations)
     print("FREQUENZA IMU: ", calculate_frequencies(filtered_timestamps))
     # plot_translations(filtered_timestamps, trajectory, "IMU")

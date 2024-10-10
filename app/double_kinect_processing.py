@@ -642,7 +642,7 @@ if 1:
 
         # Interpolate GNSS data for IMU timestamps
         interpolated_gnss_data , gnss_timestamps, trajectory_gnss = LOCALIZE.interpolate_gnss_for_imu(gnss_data, imu_data)
-        LOCALIZE.plot_gnss_data(interpolated_gnss_data)
+        #LOCALIZE.plot_gnss_data(interpolated_gnss_data)
 
         timestamps_imu, trajectory_imu, linear_accelerations, global_accelerations, rotations = LOCALIZE.process_imu_data(imu_file)
 
