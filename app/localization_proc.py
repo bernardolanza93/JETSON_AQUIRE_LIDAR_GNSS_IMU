@@ -165,19 +165,8 @@ def plot_accelerations_and_rotations(timestamps, accelerations, rotations,label 
     accelerations = np.array(accelerations)
     rotations = np.array(rotations)
 
-    # Filtrare accelerazioni con una finestra mobile
-    filtered_accelerations = np.zeros((accelerations.shape[0] - window_size + 1, accelerations.shape[1]))
-    for i in range(accelerations.shape[1]):
-        filtered_accelerations[:, i] = moving_average(accelerations[:, i], window_size)
 
-    # Filtrare rotazioni con una finestra mobile
-    filtered_rotations = np.zeros((rotations.shape[0] - window_size + 1, rotations.shape[1]))
-    for i in range(rotations.shape[1]):
-        filtered_rotations[:, i] = moving_average(rotations[:, i], window_size)
-
-    filtered_timestamps = timestamps[:filtered_accelerations.shape[0]]
-
-    time_labels = timestamp_to_hms(filtered_timestamps)
+    time_labels = timestamp_to_hms(timestamps)
 
     # Creare figure con 6 subplots
     fig, ax = plt.subplots(6, 1, figsize=(10, 12), sharex=True)
@@ -185,34 +174,34 @@ def plot_accelerations_and_rotations(timestamps, accelerations, rotations,label 
 
 
     # Plottare accelerazioni
-    ax[0].plot(time_labels, filtered_accelerations[:, 0], label='X Acceleration (filtered)')
+    ax[0].plot(time_labels, accelerations[:, 0], label='X Acceleration (filtered)')
     ax[0].set_ylabel('X Acceleration (m/s^2)')
     #ax[0].set_xlim([start, ending])
     ax[0].legend()
 
-    ax[1].plot(time_labels, filtered_accelerations[:, 1], label='Y Acceleration (filtered)')
+    ax[1].plot(time_labels, accelerations[:, 1], label='Y Acceleration (filtered)')
     ax[1].set_ylabel('Y Acceleration (m/s^2)')
     #ax[1].set_xlim([start, ending])
     ax[1].legend()
 
-    ax[2].plot(time_labels, filtered_accelerations[:, 2], label='Z Acceleration (filtered)')
+    ax[2].plot(time_labels, accelerations[:, 2], label='Z Acceleration (filtered)')
     ax[2].set_ylabel('Z Acceleration (m/s^2)')
     #ax[2].set_xlim([start, ending])
     ax[2].legend()
 
 
     # Plottare rotazioni
-    ax[3].plot(time_labels, filtered_rotations[:, 0], label='X Rotation (filtered)')
+    ax[3].plot(time_labels, rotations[:, 0], label='X Rotation (filtered)')
     ax[3].set_ylabel('X Rotation (rad/s)')
     ax[3].legend()
     #ax[3].set_xlim([start, ending])
 
-    ax[4].plot(time_labels, filtered_rotations[:, 1], label='Y Rotation (filtered)')
+    ax[4].plot(time_labels, rotations[:, 1], label='Y Rotation (filtered)')
     ax[4].set_ylabel('Y Rotation (rad/s)')
     #ax[4].set_xlim([start, ending])
     ax[4].legend()
 
-    ax[5].plot(time_labels, filtered_rotations[:, 2], label='Z Rotation (filtered)')
+    ax[5].plot(time_labels, rotations[:, 2], label='Z Rotation (filtered)')
     ax[5].set_ylabel('Z Rotation (rad/s)')
     ax[5].set_xlabel('Timestamp (s)')
     #ax[5].set_xlim([start,ending])
@@ -264,130 +253,6 @@ def plot_translations(timestamps, trajectory, label = "non specificato"):
     plt.tight_layout()
     plt.show()
 
-
-def process_imu_data_v2(file_path, euler_order='yxz', degrees=False):
-    def euler_to_rotation_matrix(angles, order):
-        """Convert Euler angles to a rotation matrix with specified order."""
-        return R.from_euler(order, angles).as_matrix()
-
-    def quaternion_to_euler(q, order, degrees=False):
-        """Convert a quaternion into Euler angles with the specified order."""
-        r = R.from_quat(q)
-        return r.as_euler(order, degrees=degrees)
-
-    def transform_acceleration(acc, rotation_matrix):
-        """Transform acceleration from IMU frame to global frame."""
-        return np.dot(rotation_matrix, acc)
-
-    def integrate(acc, dt, initial_velocity=np.zeros(3)):
-        """Integrate acceleration to get velocity."""
-        velocity = initial_velocity + acc * dt
-        return velocity
-
-    window_size = 50
-
-    # Parse JSON data
-    with open(file_path) as f:
-        imu_data = json.load(f)
-
-    # Initialize variables
-    initial_velocity = np.zeros(3)
-    initial_position = np.zeros(3)
-    previous_timestamp = None
-    trajectory = []
-    global_accelerations = []
-    velocities = []  # Array per le velocità
-    timestamps = []
-
-    # Raccolta dei dati grezzi (non filtrati)
-    raw_accelerations = []
-    raw_rotations = []
-    raw_timestamps = []
-
-    for timestamp, data in sorted(imu_data.items()):
-        timestamp = float(timestamp)
-        orientation = [data['orientation']['x'],
-                       data['orientation']['y'],
-                       data['orientation']['z'],
-                       data['orientation']['w']]  # Assumere ordine (x, y, z, w)
-
-        linear_acceleration = np.array([data['linear_acceleration']['x'],
-                                        data['linear_acceleration']['y'],
-                                        data['linear_acceleration']['z']])
-
-        # Convert quaternion to Euler angles with desired order
-        euler_angles = quaternion_to_euler(orientation, euler_order, degrees=True)
-
-        # Conserva le accelerazioni, le rotazioni e i timestamp per il filtraggio
-        raw_accelerations.append(linear_acceleration)
-        raw_rotations.append(euler_angles)
-        raw_timestamps.append(timestamp)
-
-    # Convertire in numpy array
-    raw_accelerations = np.array(raw_accelerations)
-    raw_rotations = np.array(raw_rotations)
-    raw_timestamps = np.array(raw_timestamps)
-
-    # Fase 1: Calcolare la media delle prime N letture (per esempio, 10) per ottenere il vettore di gravità
-    N = 10  # Prendi i primi 10 campioni
-    gravity_vector = np.mean(raw_accelerations[:N], axis=0)
-
-    # Sottrai il vettore di gravità da tutte le letture di accelerazione
-    raw_accelerations = raw_accelerations - gravity_vector
-
-    # Filtrare le accelerazioni lineari con una finestra mobile
-    filtered_accelerations = np.zeros((raw_accelerations.shape[0] - window_size + 1, raw_accelerations.shape[1]))
-    for i in range(raw_accelerations.shape[1]):
-        filtered_accelerations[:, i] = moving_average(raw_accelerations[:, i], window_size)
-
-    # Rimuovere i valori iniziali da timestamps e rotazioni per allinearli alle accelerazioni filtrate
-    filtered_timestamps = raw_timestamps[window_size-1:]  # Rimuove i primi (window_size-1) elementi
-    filtered_rotations = raw_rotations[window_size-1:]  # Rimuove i primi (window_size-1) elementi
-
-    # Iniziare l'integrazione usando solo i dati filtrati
-    for timestamp, linear_acceleration, euler_angles in zip(filtered_timestamps, filtered_accelerations, filtered_rotations):
-
-        # Convertire gli angoli di Eulero filtrati in matrice di rotazione
-        rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
-
-        if previous_timestamp is not None:
-            dt = timestamp - previous_timestamp
-
-            # Trasformare l'accelerazione nel sistema globale
-            global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
-
-            # Integra l'accelerazione globale per ottenere la velocità globale
-            velocity = integrate(global_acceleration, dt, initial_velocity)
-
-            # Calcola la nuova posizione utilizzando l'accelerazione globale e la velocità globale
-            position = initial_position + velocity * dt + 0.5 * global_acceleration * dt ** 2
-
-            trajectory.append(position)
-            velocities.append(velocity)  # Salvare la velocità calcolata
-            global_accelerations.append(global_acceleration)
-
-            # Aggiornare lo stato per il prossimo ciclo
-            initial_velocity = velocity
-            initial_position = position
-
-        previous_timestamp = timestamp
-
-    # Rimuovere il primo elemento da tutte le liste per sincronizzarle
-    filtered_rotations = filtered_rotations[1:]
-    filtered_timestamps = filtered_timestamps[1:]
-    filtered_accelerations = filtered_accelerations[1:]
-
-    # Visualizzare i risultati
-    print(len(filtered_timestamps))
-    print(len(filtered_rotations))
-    print(len(global_accelerations))
-    print(len(velocities))  # Mostra la lunghezza del vettore delle velocità
-    plot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations)
-    plot_accelerations_and_rotations(filtered_timestamps, global_accelerations, filtered_rotations)
-    plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations)
-    plot_translations(filtered_timestamps, trajectory)
-
-    return filtered_timestamps, trajectory, filtered_accelerations, global_accelerations, filtered_rotations
 
 
 def process_imu_data(file_path, euler_order='xyz', degrees=False):
@@ -451,10 +316,10 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
     for timestamp, data in sorted(imu_data.items()):
         timestamp = float(timestamp)
-        orientation = [data['orientation']['w'],
-                       data['orientation']['x'],
+        orientation = [data['orientation']['x'],
                        data['orientation']['y'],
-                       data['orientation']['z']]  # Assumere ordine (x, y, z, w)
+                       data['orientation']['z'],
+                       data['orientation']['w']]  # Assumere ordine (x, y, z, w)
 
         linear_acceleration = np.array([data['linear_acceleration']['x'],
                                         data['linear_acceleration']['y'],
@@ -520,25 +385,31 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
     N = 10
     initial_gravity_vector = np.mean(filtered_accelerations[:N], axis=0)
+    print(initial_gravity_vector)
 
     previous_rot_mat = euler_to_rotation_matrix(filtered_rotations[0], euler_order)
 
 
     # Iniziare l'integrazione usando solo i dati filtrati
     for timestamp, linear_acceleration, euler_angles, orientation in zip(filtered_timestamps, filtered_accelerations, filtered_rotations, filtered_quaternions):
-
-        linear_acceleration = linear_acceleration - initial_gravity_vector
+        if previous_timestamp is None:
+            first_euler = euler_angles
+            print(first_euler)
+        #linear_acceleration = linear_acceleration - initial_gravity_vector
 
 
 
 
         if previous_timestamp is not None:
             rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
+            delta_rotation_now_ini = euler_angles - first_euler
+
+
 
             delta_rotation_matrix = np.dot(rotation_matrix, np.linalg.inv(previous_rot_mat))
 
 
-            gravity_vector = rotate_gravity(initial_gravity_vector, delta_rotation_matrix)
+            gravity_vector = transform_acceleration(initial_gravity_vector, delta_rotation_now_ini)
             #print(gravity_vector)
             linear_acceleration = linear_acceleration - gravity_vector
 
@@ -558,7 +429,7 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
             trajectory.append(position)
             velocities.append(global_velocity)  # Salvare la velocità calcolata
-            global_accelerations.append(linear_acceleration)
+            global_accelerations.append(global_accelerations)
 
 
             # 2. Metodo dei quaternioni
@@ -583,6 +454,8 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
         previous_timestamp = timestamp
 
+
+
     # Rimuovere il primo elemento da tutte le liste per sincronizzarle
     filtered_rotations = filtered_rotations[1:]
     filtered_timestamps = filtered_timestamps[1:]
@@ -600,9 +473,11 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
     # plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations, "VELOCITY")
     # plot_accelerations_and_rotations(filtered_timestamps, filtered_angular_velocities, filtered_rotations, "ANGULAR VELOCITY")
+    print("waiting for graph")
+    plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations, "VELOCITY")
 
-    #qplot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations, "filtered")
-    #plot_accelerations_and_rotations(filtered_timestamps, global_accelerations, filtered_rotations)
+    plot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations, "ACC LOCAL")
+    plot_accelerations_and_rotations(filtered_timestamps, global_accelerations, filtered_rotations, "ACC GLO")
     #plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations)
     print("FREQUENZA IMU: ", calculate_frequencies(filtered_timestamps))
     # plot_translations(filtered_timestamps, trajectory, "IMU")

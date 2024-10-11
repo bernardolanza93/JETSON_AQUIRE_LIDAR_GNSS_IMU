@@ -1,6 +1,5 @@
 from custom_slam_doc import *
-from pyk4a import PyK4APlayback, Config, PyK4A
-from pyk4a import PyK4APlayback, CalibrationType
+
 import open3d as o3d
 import numpy as np
 import os
@@ -8,7 +7,6 @@ import pandas as pd
 import cv2
 import matplotlib
 import ctypes
-import pyk4a
 from matrix_utilities import *
 
 
