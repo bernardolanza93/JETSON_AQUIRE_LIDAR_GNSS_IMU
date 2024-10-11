@@ -422,7 +422,17 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
         velocity = initial_velocity + acc * dt
         return velocity
 
-    window_size = 100
+    def rotate_gravity(gravity_vector, delta_rotation_matrix):
+        """
+        Ruota il vettore di gravità usando la matrice di rotazione relativa.
+
+        gravity_vector: Vettore di gravità da ruotare.
+        delta_rotation_matrix: Matrice di rotazione relativa da applicare.
+        """
+        # Ruota la gravità usando la matrice di rotazione relativa
+        return np.dot(delta_rotation_matrix.T, gravity_vector)
+
+    window_size = 50
 
     # Parse JSON data
     with open(file_path) as f:
@@ -467,16 +477,16 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
                                         data['angular_velocity']['z']])
 
         euler_angles = quaternion_to_euler(orientation, euler_order, degrees=False)
-        # zero_acc_axes = [False, False, False]  # Annulla X e Z
+        # zero_acc_axes = [False, True, True]  # Annulla X e Z
         # if zero_acc_axes:
         #     for i, zero in enumerate(zero_acc_axes):
         #         if zero:
         #             linear_acceleration[i] = 0.0  # Azzerare l'asse corrispondente
         #
-        # # Convert quaternion to Euler angles with desired order
+        # #Convert quaternion to Euler angles with desired order
         #
         #
-        # zero_euler_axes = [False, False, False]
+        # zero_euler_axes = [True, True, False]
         # if zero_euler_axes:
         #     for i, zero in enumerate(zero_euler_axes):
         #         if zero:
@@ -521,8 +531,8 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
     # Convertire gli angoli di Eulero filtrati in matrice di rotazione
 
     N = 10
-    initial_gravity_vector = np.mean(filtered_accelerations[:N], axis=0)
-    print("initial gravity:", initial_gravity_vector)
+    initial_gravity_vector_n10_local = np.mean(filtered_accelerations[:N], axis=0)
+    print("initial gravity local:", initial_gravity_vector_n10_local)
 
     previous_rot_mat = euler_to_rotation_matrix(filtered_rotations[0], euler_order)
 
@@ -532,8 +542,14 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
     # Iniziare l'integrazione usando solo i dati filtrati
     for timestamp, linear_acceleration, euler_angles, orientation in zip(filtered_timestamps, filtered_accelerations, filtered_rotations, filtered_quaternions):
         if previous_timestamp is  None:
+
+            first_euler = euler_angles
             rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
-            initial_gravity_vector = transform_acceleration(linear_acceleration, rotation_matrix)
+            # rotation= R.from_quat(orientation)
+            # rotation_matrix = rotation.as_matrix()
+            first_frame_accelaeration_gravity = initial_gravity_vector_n10_local
+            initial_gravity_vector_global = transform_acceleration(first_frame_accelaeration_gravity, rotation_matrix)
+            print("initial gravity global:", initial_gravity_vector_global)
 
 
             print("first frame")
@@ -543,41 +559,38 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
         if previous_timestamp is not None:
             rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
+            rotation_matrix_relative_to_first_frame = euler_to_rotation_matrix(euler_angles-first_euler, euler_order)
+            gravity_from_first_frame_to_local = transform_acceleration(first_frame_accelaeration_gravity,rotation_matrix_relative_to_first_frame)
 
-            # Creare un oggetto Rotation dal quaternione
-            #rotation = R.from_quat(orientation)
-
-            # Ottenere la matrice di rotazione 3x3
-            #rotation_matrix = rotation.as_matrix()
-
-            # delta_rotation_matrix = np.dot(rotation_matrix, np.linalg.inv(previous_rot_mat))
-            #
-            #
-            # gravity_vector = rotate_gravity(initial_gravity_vector, rotation_matrix)
-            #
-            #
-            # #linear_acceleration = linear_acceleration - gravity_vector
+            # rotation= R.from_quat(orientation)
+            # rotation_matrix = rotation.as_matrix()
 
 
 
             dt = timestamp - previous_timestamp
             #dt = 0.01
             dt_under_evaluation.append(dt)
-            global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
-            global_acceleration_ng = global_acceleration - initial_gravity_vector
 
+            #trasformo acc gravita globaloe in locale:
+            #local_gravity = np.dot(rotation_matrix.T, initial_gravity_vector)
+            #linear_acceleration_ng = linear_acceleration - local_gravity
+            GLOBAL_APP = 0
+            if GLOBAL_APP:
+                global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
+                global_acceleration_ng = global_acceleration - initial_gravity_vector_global
+                global_velocity = integrate(global_acceleration_ng, dt, initial_velocity)
+                position = initial_position + global_velocity * dt + 0.5 * global_acceleration_ng * dt ** 2
+            else:
+                delta_rotation_matrix = np.dot(rotation_matrix, np.linalg.inv(previous_rot_mat))
 
-            #global_velocity = transform_velocity(velocity, delta_rotation_matrix)
+                #gravity_vector = rotate_gravity(initial_gravity_vector_n10_local, delta_rotation_matrix)
+                # print(gravity_vector)
+                linear_acceleration_nog = linear_acceleration - initial_gravity_vector_n10_local
+                velocity = integrate(linear_acceleration_nog, dt, initial_velocity)
+                global_velocity = transform_velocity(velocity, rotation_matrix)
+                global_acceleration_ng = transform_acceleration(linear_acceleration_nog, rotation_matrix)
+                position = initial_position + global_velocity * dt + 0.5 * global_acceleration_ng * dt ** 2
 
-            global_velocity = integrate(global_acceleration_ng, dt, initial_velocity)
-
-            # Trasformare la velocità nel frame globale (rotazione sulla velocità, non sull'accelerazione)
-
-            #global_velocity = velocity
-
-
-            #position = initial_position + global_velocity * dt + 0.5 * linear_acceleration * dt ** 2
-            position = initial_position + global_velocity * dt + 0.5 * global_acceleration_ng * dt ** 2
 
             trajectory.append(position)
             velocities.append(global_velocity)  # Salvare la velocità calcolata
