@@ -11,7 +11,229 @@ from scipy.spatial.transform import Rotation as R
 import datetime
 from matplotlib.ticker import MaxNLocator
 
+from skinematics import quat
+from skinematics.quat import Quaternion
+from scipy.spatial.transform import Rotation as R
+from ahrs.filters import Madgwick
+from ahrs.common.orientation import q_rot
 
+def align_gnss_trajectory(gnss_data_processed):
+    """
+    Align GNSS trajectory so that the initial motion is along the X direction (1, 0, 0),
+    by applying a rotation around the Z axis only.
+
+    Parameters:
+        gnss_data_processed (dict): Processed GNSS data with timestamp keys and position values.
+
+    Returns:
+        aligned_gnss_data_processed (dict): GNSS data after alignment.
+    """
+    # Extract GNSS timestamps and positions from the processed data
+    gnss_timestamps = []
+    gnss_positions = []
+
+    for timestamp, data in gnss_data_processed.items():
+        gnss_timestamps.append(float(timestamp))
+        position = data['position']
+        gnss_positions.append([position['x'], position['y'], position['z']])
+
+    gnss_positions = np.array(gnss_positions)
+
+    # Calculate the average initial direction of motion (using the first few points)
+    N = 400  # Number of initial points to estimate the direction
+    initial_vector = gnss_positions[N] - gnss_positions[0]  # Difference between the first N points
+    initial_direction_xy = initial_vector[:2]  # Consider only the XY plane
+    initial_direction_xy = initial_direction_xy / np.linalg.norm(initial_direction_xy)
+
+    # Calculate the rotation needed to align the initial direction with [1, 0] in the XY plane
+    target_direction = np.array([1, 0])
+    angle = np.arctan2(initial_direction_xy[1], initial_direction_xy[0]) - np.arctan2(target_direction[1], target_direction[0])
+
+    # Create a rotation matrix around the Z axis
+    rotation_matrix = np.array([
+        [np.cos(-angle), -np.sin(-angle), 0],
+        [np.sin(-angle), np.cos(-angle), 0],
+        [0, 0, 1]
+    ])
+
+    # Rotate all positions around the Z axis
+    gnss_positions_aligned = (rotation_matrix @ gnss_positions.T).T
+
+    # Create a new dictionary with the aligned positions
+    aligned_gnss_data_processed = {}
+    for i, timestamp in enumerate(gnss_timestamps):
+        aligned_gnss_data_processed[timestamp] = {
+            'position': {
+                'x': gnss_positions_aligned[i, 0],
+                'y': gnss_positions_aligned[i, 1],
+                'z': gnss_positions_aligned[i, 2]
+            }
+        }
+
+    return aligned_gnss_data_processed
+
+def plot_3d_trajectory_with_arrows(interpolated_data):
+    """
+    Plot 3D trajectory of positions and highlight the starting point.
+
+    Parameters:
+        interpolated_data (dict): Dictionary containing timestamps, positions.
+    """
+    # Extract data from the dictionary
+    timestamps = list(interpolated_data.keys())
+    positions = np.array([[interpolated_data[t]['position']['x'],
+                           interpolated_data[t]['position']['y'],
+                           interpolated_data[t]['position']['z']] for t in timestamps])
+
+    # Create 3D plot
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Plot the entire trajectory
+    ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], label='Trajectory', color='b')
+
+    # Highlight the starting point
+    ax.scatter(positions[0, 0], positions[0, 1], positions[0, 2], color='g', s=100, label='Start Point', marker='o')
+
+    # Set labels and title
+    ax.set_xlabel('X Position (m)')
+    ax.set_ylabel('Y Position (m)')
+    ax.set_zlabel('Z Position (m)')
+    ax.set_title('3D Trajectory with Start Point Highlighted')
+
+    # Setting equal scaling for all axes
+    ax.set_box_aspect([np.ptp(positions[:, 0]), np.ptp(positions[:, 1]), np.ptp(positions[:, 2])])
+
+    ax.legend()
+    plt.show()
+
+
+
+
+def plot_interpolated_data(interpolated_data):
+    """
+    Plot positions (x, y, z) and rotations (x, y, z) in function of timestamps.
+
+    Parameters:
+        interpolated_data (dict): Dictionary containing timestamps, rotations, and positions.
+    """
+    # Extract data from the dictionary
+    timestamps = list(interpolated_data.keys())
+    positions_x = [interpolated_data[t]['position']['x'] for t in timestamps]
+    positions_y = [interpolated_data[t]['position']['y'] for t in timestamps]
+    positions_z = [interpolated_data[t]['position']['z'] for t in timestamps]
+    rotations_x = [interpolated_data[t]['rotation']['x'] for t in timestamps]
+    rotations_y = [interpolated_data[t]['rotation']['y'] for t in timestamps]
+    rotations_z = [interpolated_data[t]['rotation']['z'] for t in timestamps]
+
+    # Create subplots for positions and rotations
+    fig, ax = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle('Positions and Rotations Over Time', fontsize=16)
+
+    # Plot positions
+    ax[0, 0].plot(timestamps, positions_x, label='X Position')
+    ax[0, 0].set_xlabel('Timestamp (s)')
+    ax[0, 0].set_ylabel('Position (m)')
+    ax[0, 0].set_title('X Position')
+
+    ax[0, 1].plot(timestamps, positions_y, label='Y Position')
+    ax[0, 1].set_xlabel('Timestamp (s)')
+    ax[0, 1].set_ylabel('Position (m)')
+    ax[0, 1].set_title('Y Position')
+
+    ax[0, 2].plot(timestamps, positions_z, label='Z Position')
+    ax[0, 2].set_xlabel('Timestamp (s)')
+    ax[0, 2].set_ylabel('Position (m)')
+    ax[0, 2].set_title('Z Position')
+
+    # Plot rotations
+    ax[1, 0].plot(timestamps, rotations_x, label='X Rotation')
+    ax[1, 0].set_xlabel('Timestamp (s)')
+    ax[1, 0].set_ylabel('Rotation (rad)')
+    ax[1, 0].set_title('X Rotation')
+
+    ax[1, 1].plot(timestamps, rotations_y, label='Y Rotation')
+    ax[1, 1].set_xlabel('Timestamp (s)')
+    ax[1, 1].set_ylabel('Rotation (rad)')
+    ax[1, 1].set_title('Y Rotation')
+
+    ax[1, 2].plot(timestamps, rotations_z, label='Z Rotation')
+    ax[1, 2].set_xlabel('Timestamp (s)')
+    ax[1, 2].set_ylabel('Rotation (rad)')
+    ax[1, 2].set_title('Z Rotation')
+
+    # Improve layout
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
+def interpolate_imu_gnss(imu_timestamps, imu_rotations, gnss_data_processed):
+    """
+    Interpolate GNSS positions to match IMU timestamps and associate IMU rotations.
+
+    Parameters:
+        imu_timestamps (array): Timestamps of IMU data.
+        imu_rotations (array): Rotations from IMU data.
+        gnss_data_processed (dict): Processed GNSS data with timestamp keys and position values.
+
+    Returns:
+        interpolated_data (dict): Dictionary with timestamps as keys and associated rotation and position values.
+    """
+    # Extract GNSS timestamps and positions from the processed data
+    gnss_timestamps = []
+    gnss_positions = []
+
+    for timestamp, data in gnss_data_processed.items():
+        gnss_timestamps.append(float(timestamp))
+        position = data['position']
+        gnss_positions.append([position['x'], position['y'], position['z']])
+
+    # Convert inputs to numpy arrays for easier processing
+    imu_timestamps = np.array(imu_timestamps)
+    imu_rotations = np.array(imu_rotations)
+    gnss_timestamps = np.array(gnss_timestamps)
+    gnss_positions = np.array(gnss_positions)
+
+    # Create an interpolation function for each axis of the GNSS positions
+    interp_func_x = interp1d(gnss_timestamps, gnss_positions[:, 0], kind='linear', fill_value="extrapolate")
+    interp_func_y = interp1d(gnss_timestamps, gnss_positions[:, 1], kind='linear', fill_value="extrapolate")
+    interp_func_z = interp1d(gnss_timestamps, gnss_positions[:, 2], kind='linear', fill_value="extrapolate")
+
+    # Interpolate GNSS positions to match the IMU timestamps
+    interpolated_x = interp_func_x(imu_timestamps)
+    interpolated_y = interp_func_y(imu_timestamps)
+    interpolated_z = interp_func_z(imu_timestamps)
+
+    # Stack the interpolated values to create a position array
+    interpolated_positions = np.vstack((interpolated_x, interpolated_y, interpolated_z)).T
+
+    # Normalize the rotations to start from zero
+    initial_rotation = R.from_euler('xyz', imu_rotations[0], degrees=True)
+    adjusted_rotations = []
+
+    for rotation in imu_rotations:
+        current_rotation = R.from_euler('xyz', rotation, degrees=True)
+        relative_rotation = current_rotation * initial_rotation.inv()
+        adjusted_rotations.append(relative_rotation.as_euler('xyz', degrees=True))
+
+    adjusted_rotations = np.array(adjusted_rotations)
+
+    # Create output dictionary
+    interpolated_data = {}
+    for i, timestamp in enumerate(imu_timestamps):
+        interpolated_data[timestamp] = {
+            'rotation': {
+                'x': adjusted_rotations[i, 0],
+                'y': adjusted_rotations[i, 1],
+                'z': adjusted_rotations[i, 2]
+            },
+            'position': {
+                'x': interpolated_positions[i, 0],
+                'y': interpolated_positions[i, 1],
+                'z': interpolated_positions[i, 2]
+            }
+        }
+
+    return interpolated_data
 def rotate_gravity(gravity_vector, delta_rotation_matrix):
     """
     Ruota il vettore di gravità usando la matrice di rotazione relativa.
@@ -43,22 +265,43 @@ def quaternion_to_euler(q):
     return r.as_euler('xyz', degrees=False)  # return in radians
 
 
-def plot_trajectory_3d_imuu(timestamps, trajectory):
+def plot_trajectory_3d_imuu(timestamps, trajectory, rotations):
     trajectory = np.array(trajectory)
+    rotations = np.array(rotations)
 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
-    ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2], marker='o')
+    # Plot the entire trajectory
+    ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2], marker='o', label='Trajectory')
+
+    # Highlight the first 10 points with different colors
+    for i in range(10):
+        ax.scatter(trajectory[i, 0], trajectory[i, 1], trajectory[i, 2], color=plt.cm.jet(i / 10), s=50, label=f'Point {i+1}' if i == 0 else "")
+
+    # Plot an arrow every 100 points based on rotations
+    arrow_length = 5.0  # Increased length of the arrow for better visualization
+    for i in range(0, len(trajectory), 200):
+        position = trajectory[i]
+        rotation = R.from_euler('xyz', rotations[i], degrees=True)  # Assuming rotations are in Euler angles
+        direction = rotation.apply([1, 0, 0])  # Assuming the arrow points along the x-axis in the local frame
+        ax.quiver(position[0], position[1], position[2],
+                  direction[0], direction[1], direction[2],
+                  length=arrow_length, color='r')
+
     ax.set_xlabel('X Position (m)')
     ax.set_ylabel('Y Position (m)')
     ax.set_zlabel('Z Position (m)')
-    ax.set_title('3D Trajectory')
+    ax.set_title('3D Trajectory with Orientation Arrows')
 
     # Setting equal scaling for all axes
     ax.set_box_aspect([np.ptp(trajectory[:, 0]), np.ptp(trajectory[:, 1]), np.ptp(trajectory[:, 2])])
 
+    ax.legend()
     plt.show()
+
+
+
 
 def plot_rotations(timestamps, rotations):
     rotations = np.array(rotations)
@@ -163,70 +406,64 @@ def plot_translations_double_confront(timestamps_gnss, trajectory_gnss, timestam
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
 
-def plot_accelerations_and_rotations(timestamps, accelerations, rotations,label = "no data", window_size=1):
+def plot_accelerations_and_rotations(timestamps, velocities, accelerations, rotations, label="no data"):
     accelerations = np.array(accelerations)
+    velocities = np.array(velocities)
     rotations = np.array(rotations)
 
-    # Filtrare accelerazioni con una finestra mobile
-    filtered_accelerations = np.zeros((accelerations.shape[0] - window_size + 1, accelerations.shape[1]))
-    for i in range(accelerations.shape[1]):
-        filtered_accelerations[:, i] = moving_average(accelerations[:, i], window_size)
+    # Converti i timestamp in etichette leggibili
+    time_labels = timestamp_to_hms(timestamps)
 
-    # Filtrare rotazioni con una finestra mobile
-    filtered_rotations = np.zeros((rotations.shape[0] - window_size + 1, rotations.shape[1]))
-    for i in range(rotations.shape[1]):
-        filtered_rotations[:, i] = moving_average(rotations[:, i], window_size)
+    # Crea una figura con 9 subplot
+    fig, ax = plt.subplots(9, 1, figsize=(12, 18), sharex=True)
+    fig.suptitle(f'Spostamenti X, Y, Z sensore: {label}', fontsize=16)  # Titolo generale
 
-    filtered_timestamps = timestamps[:filtered_accelerations.shape[0]]
-
-    time_labels = timestamp_to_hms(filtered_timestamps)
-
-    # Creare figure con 6 subplots
-    fig, ax = plt.subplots(6, 1, figsize=(10, 12), sharex=True)
-    fig.suptitle(f'Spostamenti X,Y,Z sensore: {label}', fontsize=16)  # Titolo generale
-
-
-    # Plottare accelerazioni
-    ax[0].plot(time_labels, filtered_accelerations[:, 0], label='X Acceleration (filtered)')
-    ax[0].set_ylabel('X Acceleration (m/s^2)')
-    #ax[0].set_xlim([start, ending])
+    # Plottare velocità
+    ax[0].plot(time_labels, velocities[:, 0], label='X Velocity')
+    ax[0].set_ylabel('X Velocity (m/s)')
     ax[0].legend()
 
-    ax[1].plot(time_labels, filtered_accelerations[:, 1], label='Y Acceleration (filtered)')
-    ax[1].set_ylabel('Y Acceleration (m/s^2)')
-    #ax[1].set_xlim([start, ending])
+    ax[1].plot(time_labels, velocities[:, 1], label='Y Velocity')
+    ax[1].set_ylabel('Y Velocity (m/s)')
     ax[1].legend()
 
-    ax[2].plot(time_labels, filtered_accelerations[:, 2], label='Z Acceleration (filtered)')
-    ax[2].set_ylabel('Z Acceleration (m/s^2)')
-    #ax[2].set_xlim([start, ending])
+    ax[2].plot(time_labels, velocities[:, 2], label='Z Velocity')
+    ax[2].set_ylabel('Z Velocity (m/s)')
     ax[2].legend()
 
-
-    # Plottare rotazioni
-    ax[3].plot(time_labels, filtered_rotations[:, 0], label='X Rotation (filtered)')
-    ax[3].set_ylabel('X Rotation (rad/s)')
+    # Plottare accelerazioni
+    ax[3].plot(time_labels, accelerations[:, 0], label='X Acceleration')
+    ax[3].set_ylabel('X Acceleration (m/s²)')
     ax[3].legend()
-    #ax[3].set_xlim([start, ending])
 
-    ax[4].plot(time_labels, filtered_rotations[:, 1], label='Y Rotation (filtered)')
-    ax[4].set_ylabel('Y Rotation (rad/s)')
-    #ax[4].set_xlim([start, ending])
+    ax[4].plot(time_labels, accelerations[:, 1], label='Y Acceleration')
+    ax[4].set_ylabel('Y Acceleration (m/s²)')
     ax[4].legend()
 
-    ax[5].plot(time_labels, filtered_rotations[:, 2], label='Z Rotation (filtered)')
-    ax[5].set_ylabel('Z Rotation (rad/s)')
-    ax[5].set_xlabel('Timestamp (s)')
-    #ax[5].set_xlim([start,ending])
+    ax[5].plot(time_labels, accelerations[:, 2], label='Z Acceleration')
+    ax[5].set_ylabel('Z Acceleration (m/s²)')
     ax[5].legend()
 
-    # Usa MaxNLocator per limitare il numero di tick visibili sull'asse X
+    # Plottare rotazioni
+    ax[6].plot(time_labels, rotations[:, 0], label='X Rotation')
+    ax[6].set_ylabel('X Rotation (rad)')
+    ax[6].legend()
+
+    ax[7].plot(time_labels, rotations[:, 1], label='Y Rotation')
+    ax[7].set_ylabel('Y Rotation (rad)')
+    ax[7].legend()
+
+    ax[8].plot(time_labels, rotations[:, 2], label='Z Rotation')
+    ax[8].set_ylabel('Z Rotation (rad)')
+    ax[8].set_xlabel('Timestamp (s)')
+    ax[8].legend()
+
+    # Limita il numero di tick sull'asse X
     for axis in ax:
-        axis.xaxis.set_major_locator(MaxNLocator(nbins=10))  # Mostra al massimo 10 etichette sull'asse X
+        axis.xaxis.set_major_locator(MaxNLocator(nbins=10))
 
-    # Ruota le etichette per renderle leggibili
-    plt.setp(ax[2].get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-
+    # Ruota le etichette dell'asse X per renderle leggibili
+    plt.setp(ax[8].get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
     plt.tight_layout()
     plt.show()
@@ -267,144 +504,122 @@ def plot_translations(timestamps, trajectory, label = "non specificato"):
     plt.show()
 
 
-def process_imu_data_v2(file_path, euler_order='yxz', degrees=False):
-    def euler_to_rotation_matrix(angles, order):
-        """Convert Euler angles to a rotation matrix with specified order."""
-        return R.from_euler(order, angles).as_matrix()
+def scykit_process_imu(file_path):
 
-    def quaternion_to_euler(q, order, degrees=False):
-        """Convert a quaternion into Euler angles with the specified order."""
-        r = R.from_quat(q)
-        return r.as_euler(order, degrees=degrees)
 
-    def transform_acceleration(acc, rotation_matrix):
-        """Transform acceleration from IMU frame to global frame."""
-        return np.dot(rotation_matrix, acc)
-
-    def integrate(acc, dt, initial_velocity=np.zeros(3)):
-        """Integrate acceleration to get velocity."""
-        velocity = initial_velocity + acc * dt
-        return velocity
-
-    window_size = 50
-
-    # Parse JSON data
     with open(file_path) as f:
         imu_data = json.load(f)
 
-    # Initialize variables
-    initial_velocity = np.zeros(3)
-    initial_position = np.zeros(3)
-    previous_timestamp = None
-    trajectory = []
-    global_accelerations = []
-    velocities = []  # Array per le velocità
     timestamps = []
+    accelerations = []
+    angular_velocities = []
+    orientations = []
 
-    # Raccolta dei dati grezzi (non filtrati)
-    raw_accelerations = []
-    raw_rotations = []
-    raw_timestamps = []
 
     for timestamp, data in sorted(imu_data.items()):
-        timestamp = float(timestamp)
-        orientation = [data['orientation']['x'],
-                       data['orientation']['y'],
-                       data['orientation']['z'],
-                       data['orientation']['w']]  # Assumere ordine (x, y, z, w)
+        timestamps.append(float(timestamp))
 
-        linear_acceleration = np.array([data['linear_acceleration']['x'],
-                                        data['linear_acceleration']['y'],
-                                        data['linear_acceleration']['z']])
+        orientations.append([
+            data['orientation']['w'],
+            data['orientation']['x'],
+            data['orientation']['y'],
+            data['orientation']['z']
+        ])  # scikit-kinematics utilizza l'ordine (w, x, y, z)
 
-        # Convert quaternion to Euler angles with desired order
-        euler_angles = quaternion_to_euler(orientation, euler_order, degrees=True)
+        accelerations.append([
+            data['linear_acceleration']['x'],
+            data['linear_acceleration']['y'],
+            data['linear_acceleration']['z']
+        ])
 
-        # Conserva le accelerazioni, le rotazioni e i timestamp per il filtraggio
-        raw_accelerations.append(linear_acceleration)
-        raw_rotations.append(euler_angles)
-        raw_timestamps.append(timestamp)
+        angular_velocities.append([
+            data['angular_velocity']['x'],
+            data['angular_velocity']['y'],
+            data['angular_velocity']['z']
+        ])
 
-    # Convertire in numpy array
-    raw_accelerations = np.array(raw_accelerations)
-    raw_rotations = np.array(raw_rotations)
-    raw_timestamps = np.array(raw_timestamps)
+    # Converti le liste in array NumPy
+    timestamps = np.array(timestamps)
+    accelerations = np.array(accelerations)
+    angular_velocities = np.array(angular_velocities)
+    orientations = np.array(orientations)
 
-    # Fase 1: Calcolare la media delle prime N letture (per esempio, 10) per ottenere il vettore di gravità
-    N = 10  # Prendi i primi 10 campioni
-    gravity_vector = np.mean(raw_accelerations[:N], axis=0)
+    #angular_velocities = np.deg2rad(angular_velocities)
 
-    # Sottrai il vettore di gravità da tutte le letture di accelerazione
-    raw_accelerations = raw_accelerations - gravity_vector
+    # Calculate time intervals
+    dt = np.diff(timestamps, prepend=timestamps[0])
 
-    # Filtrare le accelerazioni lineari con una finestra mobile
-    filtered_accelerations = np.zeros((raw_accelerations.shape[0] - window_size + 1, raw_accelerations.shape[1]))
-    for i in range(raw_accelerations.shape[1]):
-        filtered_accelerations[:, i] = moving_average(raw_accelerations[:, i], window_size)
+    # Assicurati che le unità siano corrette
+    # Se necessario, converte le velocità angolari in rad/s
+    # angular_velocities = np.deg2rad(angular_velocities)
 
-    # Rimuovere i valori iniziali da timestamps e rotazioni per allinearli alle accelerazioni filtrate
-    filtered_timestamps = raw_timestamps[window_size-1:]  # Rimuove i primi (window_size-1) elementi
-    filtered_rotations = raw_rotations[window_size-1:]  # Rimuove i primi (window_size-1) elementi
+    # Frequenza di campionamento
+    fs = 1 / np.mean(dt)  # Hz
 
-    # Iniziare l'integrazione usando solo i dati filtrati
-    for timestamp, linear_acceleration, euler_angles in zip(filtered_timestamps, filtered_accelerations, filtered_rotations):
+    # Inizializza l'algoritmo Madgwick
+    madgwick = Madgwick(sampleperiod=1 / fs)
 
-        # Convertire gli angoli di Eulero filtrati in matrice di rotazione
-        rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
+    # Inizializza array per i quaternioni
+    num_samples = len(timestamps)
+    quaternions = np.zeros((num_samples, 4))
 
-        if previous_timestamp is not None:
-            dt = timestamp - previous_timestamp
+    # Quaternione iniziale
+    q = np.array([1.0, 0.0, 0.0, 0.0])
 
-            # Trasformare l'accelerazione nel sistema globale
-            global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
+    # Stima dei quaternioni
+    for i in range(num_samples):
+        q = madgwick.updateIMU(q, angular_velocities[i], accelerations[i])
+        quaternions[i] = q
 
-            # Integra l'accelerazione globale per ottenere la velocità globale
-            velocity = integrate(global_acceleration, dt, initial_velocity)
+    # Rotazione delle accelerazioni nel sistema globale
+    acc_global = np.zeros_like(accelerations)
+    for i in range(len(accelerations)):
+        acc_global[i] = q_rot(quaternions[i], accelerations[i])
 
-            # Calcola la nuova posizione utilizzando l'accelerazione globale e la velocità globale
-            position = initial_position + velocity * dt + 0.5 * global_acceleration * dt ** 2
+    # Sottrai la gravità
+    gravity = np.array([0, 0, 9.81])  # m/s^2
+    acc_global -= gravity
 
-            trajectory.append(position)
-            velocities.append(velocity)  # Salvare la velocità calcolata
-            global_accelerations.append(global_acceleration)
+    # Integrazione per ottenere le velocità
+    velocities = np.zeros_like(acc_global)
+    for i in range(1, len(acc_global)):
+        velocities[i] = velocities[i - 1] + acc_global[i] * dt[i]
 
-            # Aggiornare lo stato per il prossimo ciclo
-            initial_velocity = velocity
-            initial_position = position
+    # Integrazione per ottenere le posizioni
+    positions = np.zeros_like(velocities)
+    for i in range(1, len(velocities)):
+        positions[i] = positions[i - 1] + velocities[i] * dt[i]
 
-        previous_timestamp = timestamp
+    # Visualizza la traiettoria
+    plt.figure(figsize=(10, 6))
+    plt.plot(positions[:, 0], positions[:, 1], label='Traiettoria XY')
+    plt.xlabel('Posizione X (m)')
+    plt.ylabel('Posizione Y (m)')
+    plt.title('Traiettoria Ricostruita con AHRS')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
-    # Rimuovere il primo elemento da tutte le liste per sincronizzarle
-    filtered_rotations = filtered_rotations[1:]
-    filtered_timestamps = filtered_timestamps[1:]
-    filtered_accelerations = filtered_accelerations[1:]
-
-    # Visualizzare i risultati
-    print(len(filtered_timestamps))
-    print(len(filtered_rotations))
-    print(len(global_accelerations))
-    print(len(velocities))  # Mostra la lunghezza del vettore delle velocità
-    plot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations)
-    plot_accelerations_and_rotations(filtered_timestamps, global_accelerations, filtered_rotations)
-    plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations)
-    plot_translations(filtered_timestamps, trajectory)
-
-    return filtered_timestamps, trajectory, filtered_accelerations, global_accelerations, filtered_rotations
+    sys.exit()
 
 
-def process_imu_data(file_path, euler_order='xyz', degrees=False):
+
+def process_imu_data(file_path, euler_order='xyz', degrees = True):
+
+
+
     #yxz
     def euler_to_rotation_matrix(angles, order):
         """Convert Euler angles to a rotation matrix with specified order."""
-        return R.from_euler(order, angles).as_matrix()
+        return R.from_euler(order, angles, degrees).as_matrix()
     def transform_acceleration(acc, rotation_matrix):
         """Transform acceleration from IMU frame to global frame."""
         return np.dot(rotation_matrix, acc)
 
-    def quaternion_to_euler(q, order, degrees=False):
+    def quaternion_to_euler(q, order, degrees_i = degrees):
         """Convert a quaternion into Euler angles with the specified order."""
         r = R.from_quat(q)
-        return r.as_euler(order, degrees=degrees)
+        return r.as_euler(order, degrees=degrees_i)
 
 
     def quaternion_rotate_vector(vector, quat):
@@ -417,22 +632,18 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
         transformed_velocity = np.dot(rotation_matrix, velocity)
         return transformed_velocity
 
+    def integrate_trapezoid(acc, previous_acc, dt, initial_velocity=np.zeros(3)):
+        """Integrate acceleration using the trapezoidal rule to get velocity."""
+        # Usa la media tra l'accelerazione precedente e quella attuale per l'integrazione
+        velocity = initial_velocity + 0.5 * (previous_acc + acc) * dt
+        return velocity
+
     def integrate(acc, dt, initial_velocity=np.zeros(3)):
         """Integrate acceleration to get velocity."""
         velocity = initial_velocity + acc * dt
         return velocity
 
-    def rotate_gravity(gravity_vector, delta_rotation_matrix):
-        """
-        Ruota il vettore di gravità usando la matrice di rotazione relativa.
-
-        gravity_vector: Vettore di gravità da ruotare.
-        delta_rotation_matrix: Matrice di rotazione relativa da applicare.
-        """
-        # Ruota la gravità usando la matrice di rotazione relativa
-        return np.dot(delta_rotation_matrix.T, gravity_vector)
-
-    window_size = 50
+    window_size = 300
 
     # Parse JSON data
     with open(file_path) as f:
@@ -440,6 +651,7 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
     # Initialize variables
     initial_velocity = np.zeros(3)
+    previous_local_velocity = np.zeros(3)
     initial_position = np.zeros(3)
     initial_velocity_q = np.zeros(3)
     initial_position_q = np.zeros(3)
@@ -454,11 +666,13 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
     velocities = []  # Array per le velocità
     timestamps = []
     angular_velocities = []
+    global_velocities = []
 
     # Raccolta dei dati grezzi (non filtrati)
     raw_accelerations = []
     raw_rotations = []
     raw_timestamps = []
+    filtered_rotation_abs_relative = []
 
 
     for timestamp, data in sorted(imu_data.items()):
@@ -476,17 +690,17 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
                                         data['angular_velocity']['y'],
                                         data['angular_velocity']['z']])
 
-        euler_angles = quaternion_to_euler(orientation, euler_order, degrees=False)
-        # zero_acc_axes = [False, True, True]  # Annulla X e Z
+        euler_angles = quaternion_to_euler(orientation, euler_order)
+        # zero_acc_axes = [False, False, False]  # Annulla X e Z
         # if zero_acc_axes:
         #     for i, zero in enumerate(zero_acc_axes):
         #         if zero:
         #             linear_acceleration[i] = 0.0  # Azzerare l'asse corrispondente
         #
-        # #Convert quaternion to Euler angles with desired order
+        # # Convert quaternion to Euler angles with desired order
         #
         #
-        # zero_euler_axes = [True, True, False]
+        # zero_euler_axes = [False, False, False]
         # if zero_euler_axes:
         #     for i, zero in enumerate(zero_euler_axes):
         #         if zero:
@@ -498,23 +712,16 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
         raw_timestamps.append(timestamp)
         angular_velocities.append(angular_velocity)
         quaternions.append(orientation)
-    initial_orientation = quaternions[0]  # Quaternione iniziale
 
-
-    # Convertire in numpy array
+    # Converti le liste in array NumPy
     raw_accelerations = np.array(raw_accelerations_nog)
     raw_rotations = np.array(raw_rotations)
     raw_timestamps = np.array(raw_timestamps)
     angular_velocities = np.array(angular_velocities)
     quaternions = np.array(quaternions)
 
-    # # Fase 1: Calcolare la media delle prime N letture (per esempio, 10) per ottenere il vettore di gravità
-    # N = 10  # Prendi i primi 10 campioni
-    # gravity_vector = np.mean(raw_accelerations_nog[:N], axis=0)
-    # print(gravity_vector)
-    #
-    # # Sottrai il vettore di gravità da tutte le letture di accelerazi0one
-    # raw_accelerations = raw_accelerations_nog - gravity_vector
+
+
 
 
     # Filtrare le accelerazioni lineari con una finestra mobile
@@ -522,78 +729,98 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
     for i in range(raw_accelerations.shape[1]):
         filtered_accelerations[:, i] = moving_average(raw_accelerations[:, i], window_size)
 
+    # Filtrare le accelerazioni lineari con una finestra mobile
+    filtered_rotations = np.zeros((raw_rotations.shape[0] - window_size + 1, raw_rotations.shape[1]))
+    for i in range(raw_rotations.shape[1]):
+        filtered_rotations[:, i] = moving_average(raw_rotations[:, i], window_size)
+
+
+
+
+
     # Rimuovere i valori iniziali da timestamps e rotazioni per allinearli alle accelerazioni filtrate
     filtered_timestamps = raw_timestamps[window_size-1:]  # Rimuove i primi (window_size-1) elementi
-    filtered_rotations = raw_rotations[window_size-1:]  # Rimuove i primi (window_size-1) elementi
     filtered_angular_velocities = angular_velocities[window_size-1:]
     filtered_quaternions = quaternions[window_size - 1:]
 
-    # Convertire gli angoli di Eulero filtrati in matrice di rotazione
+    # Assuming filtered_accelerations has been calculated already, using its shape directly
+
+    filtered_acceleration_v2 = np.zeros_like(filtered_accelerations)
+
+    # Set x-axis values to 30 at indices 20, 21, and 22, y and z remain zero
+
+    filtered_acceleration_v2[20:23, 0] = 200
+    filtered_acceleration_v2[700:, 1] = 2
+
+    #filtered_accelerations = filtered_acceleration_v2
+
+
 
     N = 10
-    initial_gravity_vector_n10_local = np.mean(filtered_accelerations[:N], axis=0)
-    print("initial gravity local:", initial_gravity_vector_n10_local)
+    initial_gravity_vector = np.mean(filtered_accelerations[:N], axis=0)
+
+
+
+    print("initial gravity:", initial_gravity_vector)
 
     previous_rot_mat = euler_to_rotation_matrix(filtered_rotations[0], euler_order)
+    first_euler = filtered_rotations[0]
+    # PRova a mettere angoli a zero prima
+
 
     dt_under_evaluation = []
+    local_velocities = []
 
 
     # Iniziare l'integrazione usando solo i dati filtrati
     for timestamp, linear_acceleration, euler_angles, orientation in zip(filtered_timestamps, filtered_accelerations, filtered_rotations, filtered_quaternions):
-        if previous_timestamp is  None:
-
-            first_euler = euler_angles
-            rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
-            # rotation= R.from_quat(orientation)
-            # rotation_matrix = rotation.as_matrix()
-            first_frame_accelaeration_gravity = initial_gravity_vector_n10_local
-            initial_gravity_vector_global = transform_acceleration(first_frame_accelaeration_gravity, rotation_matrix)
-            print("initial gravity global:", initial_gravity_vector_global)
-
-
+        #euler_myrf = euler_angles-first_euler
+        #euler_angles = - euler_angles
+        euler_myrf = euler_angles
+        if previous_timestamp is None:
+            rotation_matrix = euler_to_rotation_matrix(euler_myrf, euler_order)
+            initial_gravity_vector_global = transform_acceleration(initial_gravity_vector, rotation_matrix)
+            global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
+            global_acceleration_ng = global_acceleration - initial_gravity_vector_global
+            previous_acc_glob_ng = global_acceleration_ng
+            previous_loc_acc_ng = linear_acceleration
+            print("initial gravity global", initial_gravity_vector_global)
             print("first frame")
 
 
 
 
         if previous_timestamp is not None:
-            rotation_matrix = euler_to_rotation_matrix(euler_angles, euler_order)
-            rotation_matrix_relative_to_first_frame = euler_to_rotation_matrix(euler_angles-first_euler, euler_order)
-            gravity_from_first_frame_to_local = transform_acceleration(first_frame_accelaeration_gravity,rotation_matrix_relative_to_first_frame)
 
-            # rotation= R.from_quat(orientation)
-            # rotation_matrix = rotation.as_matrix()
-
-
+            rotation_matrix = euler_to_rotation_matrix(euler_myrf, euler_order)
 
             dt = timestamp - previous_timestamp
             #dt = 0.01
             dt_under_evaluation.append(dt)
 
-            #trasformo acc gravita globaloe in locale:
-            #local_gravity = np.dot(rotation_matrix.T, initial_gravity_vector)
-            #linear_acceleration_ng = linear_acceleration - local_gravity
-            GLOBAL_APP = 0
-            if GLOBAL_APP:
+            GLOBAL_APPROACH = 1
+            if GLOBAL_APPROACH:
+
                 global_acceleration = transform_acceleration(linear_acceleration, rotation_matrix)
+
                 global_acceleration_ng = global_acceleration - initial_gravity_vector_global
-                global_velocity = integrate(global_acceleration_ng, dt, initial_velocity)
-                position = initial_position + global_velocity * dt + 0.5 * global_acceleration_ng * dt ** 2
+                global_velocity = integrate_trapezoid(global_acceleration_ng,previous_acc_glob_ng, dt, initial_velocity)
+                local_velocity = integrate_trapezoid(linear_acceleration,previous_loc_acc_ng, dt, previous_local_velocity)
             else:
-                delta_rotation_matrix = np.dot(rotation_matrix, np.linalg.inv(previous_rot_mat))
+                gravity_local = np.dot(rotation_matrix.T, initial_gravity_vector_global)
+                net_acceleration_local = linear_acceleration - gravity_local
 
-                #gravity_vector = rotate_gravity(initial_gravity_vector_n10_local, delta_rotation_matrix)
-                # print(gravity_vector)
-                linear_acceleration_nog = linear_acceleration - initial_gravity_vector_n10_local
-                velocity = integrate(linear_acceleration_nog, dt, initial_velocity)
-                global_velocity = transform_velocity(velocity, rotation_matrix)
-                global_acceleration_ng = transform_acceleration(linear_acceleration_nog, rotation_matrix)
-                position = initial_position + global_velocity * dt + 0.5 * global_acceleration_ng * dt ** 2
+                global_acceleration_ng = transform_acceleration(net_acceleration_local, rotation_matrix)
+                local_velocity = integrate(net_acceleration_local, dt, initial_velocity)
+                global_velocity = transform_velocity(local_velocity,rotation_matrix)
 
+            initial_position = np.array(initial_position)
+            global_velocity = np.array(global_velocity)
+            global_acceleration_ng = np.array(global_acceleration_ng)
 
+            #position = initial_position + global_velocity * dt + 0.5 * linear_acceleration * dt ** 2
+            position = initial_position + global_velocity * dt + 0.5 * global_acceleration_ng * (dt ** 2)
             trajectory.append(position)
-            velocities.append(global_velocity)  # Salvare la velocità calcolata
             global_accelerations.append(global_acceleration_ng)
 
 
@@ -604,6 +831,9 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
             trajectory_quaternion.append(position_quaternion)
             velocities_quaternion.append(velocity_quaternion)
             global_accelerations_quat.append(global_acc_quat)
+            local_velocities.append(local_velocity)
+            global_velocities.append(global_velocity)
+            filtered_rotation_abs_relative.append(euler_myrf)
 
             initial_velocity_q = velocity_quaternion
             initial_position_q = position_quaternion
@@ -613,6 +843,9 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
             initial_velocity = global_velocity
             initial_position = position
             previous_rot_mat = rotation_matrix
+            previous_acc_glob_ng = global_acceleration_ng
+            previous_loc_acc_ng = linear_acceleration
+            previous_local_velocity = local_velocity
 
 
 
@@ -626,6 +859,12 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
     filtered_angular_velocities = filtered_angular_velocities[1:]
     filtered_quaternions =filtered_quaternions[1:]
 
+    velocities = np.array(local_velocities)
+    angles_deg = np.degrees(np.arctan2(velocities[:, 1], velocities[:, 0]))
+
+
+
+
 
     # Visualizzare i risultati
     # print(len(filtered_timestamps))
@@ -635,19 +874,17 @@ def process_imu_data(file_path, euler_order='xyz', degrees=False):
 
 
 
-    plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations, "VELOCITY")
     # plot_accelerations_and_rotations(filtered_timestamps, filtered_angular_velocities, filtered_rotations, "ANGULAR VELOCITY")
     #qplot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations, "filtered")
-    plot_accelerations_and_rotations(filtered_timestamps, filtered_accelerations, filtered_rotations, "RAW ACC")
-    plot_accelerations_and_rotations(filtered_timestamps, global_accelerations, filtered_rotations, "GLOBAL ACC")
+    #plot_accelerations_and_rotations(filtered_timestamps, local_velocities, filtered_accelerations, filtered_rotation_abs_relative, "grandezze locali")
+    #plot_accelerations_and_rotations(filtered_timestamps,global_velocities, global_accelerations, filtered_rotation_abs_relative, "grandezze globali")
     #plot_accelerations_and_rotations(filtered_timestamps, velocities, filtered_rotations)
     print("FREQUENZA IMU: ", calculate_frequencies(filtered_timestamps))
     # plot_translations(filtered_timestamps, trajectory, "IMU")
     # plot_translations(filtered_timestamps, trajectory_quaternion, "IMU_QUATERNIONS")
 
 
-    return filtered_timestamps, trajectory, filtered_accelerations, global_accelerations, filtered_rotations
-
+    return filtered_timestamps, trajectory, filtered_accelerations, global_accelerations, filtered_rotation_abs_relative
 def load_json(file_path):
     with open(file_path, 'r') as file:
         return json.load(file)

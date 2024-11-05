@@ -431,7 +431,7 @@ def hierarchy_slam_icp(input_all_pointcloud,timestamp_sorted):
                 target =  epoch_start_pointclouds[i-1]
 
 
-                VOXEL_VOLUME = 0.03
+                VOXEL_VOLUME = 0.1
                 current_source = downsample_point_cloud(current_source, VOXEL_VOLUME)
                 target = downsample_point_cloud(target, VOXEL_VOLUME)
 
@@ -642,13 +642,20 @@ if 1:
 
         # Interpolate GNSS data for IMU timestamps
         interpolated_gnss_data , gnss_timestamps, trajectory_gnss = LOCALIZE.interpolate_gnss_for_imu(gnss_data, imu_data)
-        #LOCALIZE.plot_gnss_data(interpolated_gnss_data)
+        interpolated_gnss_data = LOCALIZE.align_gnss_trajectory(interpolated_gnss_data)
+
+
+        LOCALIZE.plot_gnss_data(interpolated_gnss_data)
+
+        #LOCALIZE.scykit_process_imu(imu_file)
 
         timestamps_imu, trajectory_imu, linear_accelerations, global_accelerations, rotations = LOCALIZE.process_imu_data(imu_file)
 
-        LOCALIZE.plot_translations_double_confront(gnss_timestamps, trajectory_gnss, timestamps_imu, trajectory_imu)
+        #LOCALIZE.plot_translations_double_confront(gnss_timestamps, trajectory_gnss, timestamps_imu, trajectory_imu)
 
-
+        interpolated_data = LOCALIZE.interpolate_imu_gnss(timestamps_imu,rotations,interpolated_gnss_data)
+        LOCALIZE.plot_interpolated_data(interpolated_data)
+        LOCALIZE.plot_3d_trajectory_with_arrows(interpolated_data)
 
         # Plot the translations
 
@@ -663,7 +670,11 @@ if 1:
         # LOCALIZE.plot_rotations(timestamps, rotations)
 
         # Plot the 3D trajectory
-        LOCALIZE.plot_trajectory_3d_imuu(timestamps_imu, trajectory_imu)
+        LOCALIZE.plot_trajectory_3d_imuu(timestamps_imu, trajectory_imu, rotations)
+
+
+
+
         sys.exit()
 
 
