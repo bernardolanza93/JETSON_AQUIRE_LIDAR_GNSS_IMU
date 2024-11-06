@@ -4,6 +4,7 @@ from pyk4a import PyK4APlayback, CalibrationType
 import open3d as o3d
 import numpy as np
 import os
+import plotter as PLOT
 os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = '/usr/lib/x86_64-linux-gnu/qt5/plugins'
 import matplotlib
 matplotlib.use('TkAgg')
@@ -12,6 +13,7 @@ import pandas as pd
 import cv2
 import matplotlib.pyplot as plt
 import ctypes
+from scipy.spatial.transform import Rotation as R
 import pyk4a
 import matrix_utilities as MATRIX_UTILS
 import PREPROC_double_KA as KA_PREPROC
@@ -21,48 +23,11 @@ from decorator import *
 import localization_proc as LOCALIZE
 
 
-def plot_trajectory_3d(timestamp_dict):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    # Ordina i timestamp
-    sorted_timestamps = sorted(timestamp_dict.keys())
-
-    # Inizializza la posizione iniziale (matrice identità)
-    current_position = np.eye(4)
-
-    # Liste per memorizzare le coordinate x, y, z
-    x = [current_position[0, 3]]
-    y = [current_position[1, 3]]
-    z = [current_position[2, 3]]
-
-    # Applica le trasformazioni in ordine di timestamp
-    for ts in sorted_timestamps:
-        transform = timestamp_dict[ts]
-        current_position = np.dot(current_position, transform)
-        x.append(current_position[0, 3])
-        y.append(current_position[1, 3])
-        z.append(current_position[2, 3])
-
-    # Plotta la traiettoria 3D
-    ax.plot(x, y, z, marker='o', linewidth=0.2)
-
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.set_title('Trajectory 3D Plot')
-
-    # Assicura che gli assi abbiano la stessa scala
-    ax.set_aspect('auto')
-    max_range = np.array([max(x)-min(x), max(y)-min(y), max(z)-min(z)]).max()
-    mid_x = (max(x) + min(x)) * 0.5
-    mid_y = (max(y) + min(y)) * 0.5
-    mid_z = (max(z) + min(z)) * 0.5
-    ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
-    ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
-    ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
-
-    plt.show()
+#TODO in fusione fai in modo che l area presa in considerazione sia un multiplo
+# dell area comune che non sai qual e, ma tieni conto che sia circa 3 metri,
+# quinid prendi solo l area - 3 metri fdal centro di fusione,
+# che dovrebbe essere 95 perc source, 0 percentile target o simile sulla x, e 50 per y
+# TIRA GIU anche l accelerometro della kinect
 
 def downsample_point_cloud(point_cloud, voxel_size):
     """
@@ -358,9 +323,72 @@ def remove_isolated_points(pcd, nb_neighbors=10, radius=500.0):
     pcd_cleaned = pcd.select_by_index(ind)
     return pcd_cleaned
 
-@timeit
-def hierarchy_slam_icp(input_all_pointcloud,timestamp_sorted):
 
+
+
+def weighted_average_quaternions(q1, q2, w1, w2):
+    """
+    Esegue una media pesata tra due quaternioni e normalizza il risultato.
+    """
+    q = w1 * q1 + w2 * q2
+    return q / np.linalg.norm(q)
+def correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_timestamp, updated_trasform_icp_result, w_icp, w_gnss, no_pc=False):
+
+    if previous_timestamp is not None:
+        # Estrarre la trasformazione corrispondente dalla traiettoria GNSS e IMU
+        current_trajectory = downsampled_data.get(current_timestamp)
+        previous_trajectory = downsampled_data.get(previous_timestamp)
+
+        # Calcolare il delta della traiettoria tra il timestamp corrente e quello precedente
+        delta_position = {
+            'x': current_trajectory['position']['x'] - previous_trajectory['position']['x'],
+            'y': current_trajectory['position']['y'] - previous_trajectory['position']['y'],
+            'z': current_trajectory['position']['z'] - previous_trajectory['position']['z']
+        }
+        delta_rotation = {
+            'x': current_trajectory['rotation']['x'] - previous_trajectory['rotation']['x'],
+            'y': current_trajectory['rotation']['y'] - previous_trajectory['rotation']['y'],
+            'z': current_trajectory['rotation']['z'] - previous_trajectory['rotation']['z']
+        }
+
+        if no_pc:
+            print("_!_!_ NO PC")
+            # Utilizza direttamente la trasformazione GNSS/IMU senza mediazione
+            combined_rotation_matrix = R.from_euler('xyz', [delta_rotation['x'], delta_rotation['y'], delta_rotation['z']], degrees=False).as_matrix()
+            combined_translation = np.array([delta_position['x'], delta_position['y'], delta_position['z']])
+        else:
+            # Converti la matrice di rotazione in quaternione per l'ICP
+            icp_rotation_matrix = np.array(updated_trasform_icp_result[:3, :3], copy=True)
+            icp_quaternion = R.from_matrix(icp_rotation_matrix).as_quat()
+
+            # Converti la rotazione GNSS/IMU in quaternione
+            gnss_rotation = R.from_euler('xyz', [delta_rotation['x'], delta_rotation['y'], delta_rotation['z']], degrees=False)
+            gnss_quaternion = gnss_rotation.as_quat()
+
+            # Calcola la media pesata dei quaternioni
+            combined_quaternion = w_icp * icp_quaternion + w_gnss * gnss_quaternion
+            combined_quaternion /= np.linalg.norm(combined_quaternion)
+
+            # Converti il quaternione mediato in una matrice di rotazione
+            combined_rotation_matrix = R.from_quat(combined_quaternion).as_matrix()
+
+            # Calcola la traslazione mediata
+            delta_translation_icp = updated_trasform_icp_result[:3, 3]
+            delta_translation_gnss = np.array([delta_position['x'], delta_position['y'], delta_position['z']])
+            combined_translation = w_icp * delta_translation_icp + w_gnss * delta_translation_gnss
+
+        # Ricostruisci la matrice di trasformazione 4x4
+        combined_transformation = np.eye(4)
+        combined_transformation[:3, :3] = combined_rotation_matrix
+        combined_transformation[:3, 3] = combined_translation
+    else:
+
+        combined_transformation = np.eye(4)
+    return combined_transformation
+
+
+@timeit
+def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, VOXEL_VOLUME,w_icp=0.999, w_gnss=0.001):
     # devo saltare la zero che è solo target
     # prendo la sua trasformata trovata tra le sotto pc e la applico alla coppia dopo
     # current_source.trasform(last_epoch_trasformation[i-1])
@@ -383,7 +411,12 @@ def hierarchy_slam_icp(input_all_pointcloud,timestamp_sorted):
 
     last_epoch_trasformation = [np.eye(4) for _ in range(len(input_all_pointcloud))]
     x_y = []
-    timestamp_dict = {}
+
+
+    max_filtered_pointcloud_size = 0
+    total_filtered_points = 0
+
+    trajectory_deltas = {}
 
     while len(epoch_start_pointclouds) > 1:
         start_time = time.time()
@@ -395,201 +428,197 @@ def hierarchy_slam_icp(input_all_pointcloud,timestamp_sorted):
 
         print(f"START Epoch {epoch}, PCs:{len(epoch_start_pointclouds)}")
 
-
         while i < len(epoch_start_pointclouds):
-
-
             if len(epoch_start_pointclouds) == 2:
                 print("LAST EPOCH")
                 print(len(last_epoch_trasformation))
                 print(len(epoch_start_pointclouds))
 
-            #TOGLILO
             if i > 0:
-
-                #print(i, end=" ")
-
-                initial_trasform_from_last_epoch_1_couple = (last_epoch_trasformation[i-1])
+                initial_trasform_from_last_epoch_1_couple = (last_epoch_trasformation[i - 1])
                 initial_trasform_from_last_epoch_2_couple = (last_epoch_trasformation[i])
 
-                # CONSIDERO I PRIOR DI ENTRAMBE LE SOURCE PASSATE, PERCHE SE NO PIU AUMENTANO LE EPOCE PIU AUMENTA IL LAG TRA LE POINTCLOUS.
-                # QUINDI PRENDO IL PRIOR TRASFORMATION DA ENTRAMBE LE PC CHE HANNO COSTRUITO LA CORRENTE.
-
-
-
-                #Salvolo entrambe però perche l iterazione dopo saranno lunghe il doppio e mi servve la lunghezza di una piu l altra per traslare
                 prior_trasformation_composed = np.dot(initial_trasform_from_last_epoch_1_couple, initial_trasform_from_last_epoch_2_couple)
-                #prior_trasformation_composed = initial_trasform_from_last_epoch_2_couple
-
                 source_raw = epoch_start_pointclouds[i]
 
                 current_source = o3d.geometry.PointCloud(source_raw)
-                # devo aggiungere anche la trasformata delle iterazioni prima BASTA CHE LE LAST EPOCH LA COMPRENDANO
-
                 current_source.transform(initial_trasform_from_last_epoch_1_couple)
 
-                target =  epoch_start_pointclouds[i-1]
+                target = epoch_start_pointclouds[i - 1]
 
 
-                VOXEL_VOLUME = 0.1
                 current_source = downsample_point_cloud(current_source, VOXEL_VOLUME)
                 target = downsample_point_cloud(target, VOXEL_VOLUME)
 
+                source_bounds = np.asarray(current_source.get_max_bound()) - np.asarray(current_source.get_min_bound())
+                target_bounds = np.asarray(target.get_max_bound()) - np.asarray(target.get_min_bound())
+                max_source_bound = np.max(source_bounds)
+                max_target_bound = np.max(target_bounds)
+                #print(f"MaxDIM: {round(np.max([max_source_bound, max_target_bound]), 2)} m")
+
+                if np.any(source_bounds > 8) or np.any(target_bounds > 8):
 
 
-                SHOW_ICP_PROCESS = 0
-                if SHOW_ICP_PROCESS:
-                    if len(current_source.points) < 600 or len(target.points) < 600:
-                        target = remove_isolated_points(target, nb_neighbors=12, radius=0.7)
-                        current_source = remove_isolated_points(current_source, nb_neighbors=12, radius=0.8)
+                    source_centroid = np.mean(np.asarray(current_source.points), axis=0)
+                    target_centroid = np.mean(np.asarray(target.points), axis=0)
+                    central_point = (source_centroid + target_centroid) / 2
 
-                    yellow = np.array([1, 1, 0])
-                    red =  np.array([1, 0, 0])
-                    green = np.array([0, 1, 0])
-                    blue = np.array([0, 0, 1])
+                    def filter_points_within_radius(pointcloud, center, radius):
 
-                    # print("source",len(current_source.points))
-                    # print("target", len(target.points))
-                    if len(current_source.points) < 600 or len(target.points) < 600:
-                        target = remove_isolated_points(target, nb_neighbors=12, radius=0.7)
-                        current_source = remove_isolated_points(current_source, nb_neighbors=12, radius=0.8)
+                        points = np.asarray(pointcloud.points)
+                        distances = np.linalg.norm(points - center, axis=1)
+                        filtered_points = points[distances <= radius]
+                        filtered_pointcloud = o3d.geometry.PointCloud()
+                        filtered_pointcloud.points = o3d.utility.Vector3dVector(filtered_points)
+                        return filtered_pointcloud, len(points) - len(filtered_points)
 
-                    current_source.colors = o3d.utility.Vector3dVector(np.tile(yellow, (len(current_source.points), 1)))
-                    target.colors = o3d.utility.Vector3dVector(np.tile(red, (len(target.points), 1)))
-                    pre_icp = target + current_source
-                    visualize_pc(pre_icp, "pre icp")
-
-                    # Imposta tutti i punti al colore bianco (RGB: [1, 1, 1])
-                    white = np.array([1, 1, 1])
-                    current_source.colors = o3d.utility.Vector3dVector(np.tile(green, (len(current_source.points), 1)))
-                    target.colors = o3d.utility.Vector3dVector(np.tile(blue, (len(target.points), 1)))
+                    radius = 4.0
+                    filtered_source, filtered_points_source = filter_points_within_radius(current_source, central_point, radius)
+                    source_bounds_filtered = np.asarray(filtered_source.get_max_bound()) - np.asarray(filtered_source.get_min_bound())
+                    max_source_filtered_bound = np.max(source_bounds_filtered)
 
 
+                    filtered_target, filtered_points_target = filter_points_within_radius(target, central_point, radius)
+                    target_bounds_filtered = np.asarray(filtered_target.get_max_bound()) - np.asarray(filtered_target.get_min_bound())
+                    max_target_filtered_bound = np.max(target_bounds_filtered)
+                    print(
+                        f"TENDAGGIO SOURCE from {round(max_source_bound, 2)} to {round(max_source_filtered_bound, 2)} m (-{filtered_points_source} points)")
+                    print(
+                        f"TENDAGGIO TARGET from {round(max_target_bound, 2)} to {round(max_target_filtered_bound, 2)} m (-{filtered_points_target} points)")
 
+                    total_filtered_points += filtered_points_source + filtered_points_target
+                    max_filtered_pointcloud_size = max(max_filtered_pointcloud_size, len(filtered_source.points), len(filtered_target.points))
+                else:
+                    filtered_source = current_source
+                    filtered_target = target
 
+                # Calcolare l'indice corrente del timestamp
+                timestamp_index = i // 2 if epoch == 1 else len(timestamp_sorted) // (2 ** (epoch - 1)) + i // 2
+                current_timestamp = timestamp_sorted[timestamp_index]
+                previous_timestamp = timestamp_sorted[timestamp_index - 1] if timestamp_index > 0 else None
 
+                #if 1:
+                if len(filtered_source.points) == 0 or len(filtered_target.points) == 0:
+                    print("Warning: One of the point clouds is empty after filtering.")
+                    updated_trasform_icp_result = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
+                                                                            current_timestamp,
+                                                                            0, w_icp,
+                                                                            w_gnss, True)
+                else:
+                    updated_trasform_icp_result_raw = CUSTOM_SLAM.icp_open3d(filtered_source, filtered_target, 0.05, 200)
+                    updated_trasform_icp_result = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
+                                                                            current_timestamp,
+                                                                            updated_trasform_icp_result_raw, w_icp,
+                                                                            w_gnss)
 
-                updated_trasform_icp_result = CUSTOM_SLAM.icp_open3d(current_source, target, 0.05, 200)
-                #Total trasformation : current, plus the prrevious frame trasf:
+                if previous_timestamp is not None:
+                    # Estrarre la trasformazione corrispondente dalla traiettoria GNSS e IMU
+                    current_trajectory = downsampled_data.get(current_timestamp)
+                    previous_trajectory = downsampled_data.get(previous_timestamp)
+
+                    # Calcolare il delta della traiettoria tra il timestamp corrente e quello precedente
+                    delta_position = {
+                        'x': current_trajectory['position']['x'] - previous_trajectory['position']['x'],
+                        'y': current_trajectory['position']['y'] - previous_trajectory['position']['y'],
+                        'z': current_trajectory['position']['z'] - previous_trajectory['position']['z']
+                    }
+                    delta_rotation = {
+                        'x': current_trajectory['rotation']['x'] - previous_trajectory['rotation']['x'],
+                        'y': current_trajectory['rotation']['y'] - previous_trajectory['rotation']['y'],
+                        'z': current_trajectory['rotation']['z'] - previous_trajectory['rotation']['z']
+                    }
+                else:
+                    # Se non c'è una traiettoria precedente, il delta è considerato zero
+                    delta_position = {'x': 0, 'y': 0, 'z': 0}
+                    delta_rotation = {'x': 0, 'y': 0, 'z': 0}
+
+                # Creare un dizionario per la fusione corrente con la trasformazione stimata dallo SLAM ICP e il delta GNSS/IMU
+                trajectory_deltas[current_timestamp] = {
+                    'slam_icp_transformation': {
+                        'delta_x': updated_trasform_icp_result[0, 3],
+                        'delta_y': updated_trasform_icp_result[1, 3],
+                        'delta_z': updated_trasform_icp_result[2, 3],
+                        'rotation_matrix': updated_trasform_icp_result[:3, :3].tolist()
+                    },
+                    'gnss_imu_transformation': {
+                        'delta_x': delta_position['x'],
+                        'delta_y': delta_position['y'],
+                        'delta_z': delta_position['z'],
+                        'delta_rotation_x': delta_rotation['x'],
+                        'delta_rotation_y': delta_rotation['y'],
+                        'delta_rotation_z': delta_rotation['z']
+                    }
+                }
+
+                # Estrarre il timestamp associato
+                current_timestamp = timestamp_sorted[timestamp_index]
+
+                # Estrarre la trasformazione corrispondente dalla traiettoria GNSS e IMU
+                current_trajectory = downsampled_data.get(current_timestamp)
+                previous_trajectory = downsampled_data[
+                    timestamp_sorted[timestamp_index - 1]] if timestamp_index > 0 else None
+
+                if previous_trajectory is not None:
+                    # Calcolare il delta della traiettoria tra il timestamp corrente e quello precedente
+                    delta_position = {
+                        'x': current_trajectory['position']['x'] - previous_trajectory['position']['x'],
+                        'y': current_trajectory['position']['y'] - previous_trajectory['position']['y'],
+                        'z': current_trajectory['position']['z'] - previous_trajectory['position']['z']
+                    }
+                    delta_rotation = {
+                        'x': current_trajectory['rotation']['x'] - previous_trajectory['rotation']['x'],
+                        'y': current_trajectory['rotation']['y'] - previous_trajectory['rotation']['y'],
+                        'z': current_trajectory['rotation']['z'] - previous_trajectory['rotation']['z']
+                    }
+                else:
+                    # Se non c'è una traiettoria precedente, il delta è considerato zero
+                    delta_position = {'x': 0, 'y': 0, 'z': 0}
+                    delta_rotation = {'x': 0, 'y': 0, 'z': 0}
+
+                # Creare un dizionario per la fusione corrente con la trasformazione stimata dallo SLAM ICP e il delta GNSS/IMU
+                trajectory_deltas[current_timestamp] = {
+                    'slam_icp_transformation': {
+                        'delta_x': updated_trasform_icp_result[0, 3],
+                        'delta_y': updated_trasform_icp_result[1, 3],
+                        'delta_z': updated_trasform_icp_result[2, 3],
+                        'delta_rotation_x': np.arctan2(updated_trasform_icp_result[2, 1], updated_trasform_icp_result[2, 2]),
+                        'delta_rotation_y': np.arcsin(-updated_trasform_icp_result[2, 0]),
+                        'delta_rotation_z': np.arctan2(updated_trasform_icp_result[1, 0], updated_trasform_icp_result[0, 0]),
+                        'rotation_matrix': updated_trasform_icp_result[:3, :3].tolist()
+                    },
+                    'gnss_imu_transformation': {
+                        'delta_x': delta_position['x'],
+                        'delta_y': delta_position['y'],
+                        'delta_z': delta_position['z'],
+                        'delta_rotation_x': delta_rotation['x'],
+                        'delta_rotation_y': delta_rotation['y'],
+                        'delta_rotation_z': delta_rotation['z']
+                    }
+                }
                 x_y.append(updated_trasform_icp_result[0, -3:])
                 total_trasformation_prior_plus_icp = np.dot(prior_trasformation_composed, updated_trasform_icp_result)
-
 
                 trasformed_icp_source = o3d.geometry.PointCloud(current_source)
                 trasformed_icp_source.transform(updated_trasform_icp_result)
 
-                if len(epoch_start_pointclouds) == 2:
-                    print(updated_trasform_icp_result)
-
-                    # pre_icp  = target + current_source
-                    # visualize_pc(pre_icp, "pre icp")
-
-
                 merged_pcd = target + trasformed_icp_source
-
-
-
-
-
-                if SHOW_ICP_PROCESS:
-                    visualize_pc(merged_pcd, "merged")
-                    current_source.colors = o3d.utility.Vector3dVector(np.tile(white, (len(current_source.points), 1)))
-                    target.colors = o3d.utility.Vector3dVector(np.tile(white, (len(target.points), 1)))
-
-
-
-                # Controllo se esiste una point cloud precedente e successiva
-                # Controllo se esiste una point cloud precedente e successiva
-
-                PREVIOUS_ADDICTION = 0
-                if PREVIOUS_ADDICTION:
-                    #all inizio non ha senso usarlo perche la percentuale di sovrapposizione è alta
-                    if epoch > 4:
-                        if i - 2 >= 0:
-                            previous_pc = epoch_start_pointclouds[i - 2]
-                            initial_transform_previous_1 = last_epoch_trasformation[i - 2]
-                            initial_transform_previous_2 = last_epoch_trasformation[i - 1]
-                            prior_transform_composed_previous = np.dot(initial_transform_previous_1,
-                                                                       initial_transform_previous_2)
-
-                            #COME AGGIORNATO BASTA UNA SOLA TRASFORMAZIONE
-                            # Trasformare la merged_pcd
-                            merged_pcd.transform(initial_transform_previous_1)
-                            # Eseguire ICP per allineare merged_pcd con previous_pc
-                            previous_pc_transformed = o3d.geometry.PointCloud(previous_pc)
-                            updated_transform_icp_result_previous = CUSTOM_SLAM.icp_open3d(merged_pcd, previous_pc_transformed)
-
-                            # Correggere merged_pcd con la trasformazione ICP trovata
-                            merged_pcd.transform(updated_transform_icp_result_previous)
-                            merged_pcd += previous_pc_transformed
-
-                NEXT_ADDITION = 0
-                if NEXT_ADDITION:
-
-
-                    if i + 1 < len(epoch_start_pointclouds):
-                        next_pc = epoch_start_pointclouds[i + 1]
-
-
-                        #COME AGGIORNATO INVECE CHE 2 NE BASTA UNA INVECE CHE 6 NE BASTANO 3
-
-                        # Coppia di trasformazioni per unire la previous
-                        transform_previous_1 = last_epoch_trasformation[i - 2]
-                        transform_previous_2 = last_epoch_trasformation[i - 1]
-                        transform_composed_previous = np.dot(transform_previous_1, transform_previous_2)
-
-                        # Coppia di trasformazioni per unire la current
-                        transform_current_1 = last_epoch_trasformation[i]
-                        transform_current_2 = last_epoch_trasformation[i + 1]
-                        transform_composed_current = np.dot(transform_current_1, transform_current_2)
-
-                        # Coppia di trasformazioni per unire la next (per la prossima iterazione)
-                        transform_next_1 = last_epoch_trasformation[i]
-                        transform_next_2 = last_epoch_trasformation[i + 1]
-                        transform_composed_next = np.dot(transform_next_1, transform_next_2)
-
-                        # Combinare tutte le trasformazioni
-                        combined_transform = np.dot(transform_previous_1, transform_current_1)
-                        combined_transform = np.dot(combined_transform, transform_next_1)
-
-                        # Trasformare la merged_pcd con le trasformazioni combinate
-                        next_pc.transform(combined_transform)
-
-                        # Eseguire ICP per allineare merged_pcd con next_pc
-                        next_pc_transformed = o3d.geometry.PointCloud(next_pc)
-                        transform_icp_result_next = CUSTOM_SLAM.icp_open3d(merged_pcd, next_pc_transformed)
-
-                        # Correggere merged_pcd con la trasformazione ICP trovata
-                        next_pc_transformed.transform(transform_icp_result_next)
-                        merged_pcd += next_pc_transformed
-
-
                 merged_pcd = remove_isolated_points(merged_pcd, nb_neighbors=12, radius=0.4)
                 trasformation_current.append(total_trasformation_prior_plus_icp)
                 new_halfed_pointcloud.append(merged_pcd)
 
-
-                # i = 97, len = 99,
-                # quando i = 99 rompe e quindi perderò la pointclou i[98], che sarabbe il target di i[99] che non arriveà
-                if i == len(epoch_start_pointclouds) - 2 and len(epoch_start_pointclouds) % 2 != 0:  # Vogliamo eliminare
-                # SKip the odd last matrixprint
-                   # 100/101 i  = 100
-
+                if i == len(epoch_start_pointclouds) - 2 and len(epoch_start_pointclouds) % 2 != 0:
                     print("DISPARI")
                     print(f"START Epoch {epoch},i = {i}, PCs AVIABLE:{len(epoch_start_pointclouds)} PCS comp:{len(new_halfed_pointcloud)} trasform:{len(trasformation_current)}")
                     print("add last PC with its trasformation")
-                    # TO DO TO INCLUDE LAST
-                    last_pc = epoch_start_pointclouds[i+1] #98
-                    last_trasaform = (last_epoch_trasformation[i+1]) #98
+                    last_pc = epoch_start_pointclouds[i + 1]
+                    last_trasaform = (last_epoch_trasformation[i + 1])
 
                     trasformation_current.append(last_trasaform)
                     new_halfed_pointcloud.append(last_pc)
 
-                timestamp_index = i // 2 if epoch == 1 else len(timestamp_sorted) // (2 ** (epoch - 1)) + i // 2
-                timestamp_dict[timestamp_sorted[timestamp_index]] = updated_trasform_icp_result
+
 
             i += 2
-
 
         epoch_start_pointclouds = new_halfed_pointcloud
         last_epoch_trasformation = trasformation_current
@@ -598,19 +627,16 @@ def hierarchy_slam_icp(input_all_pointcloud,timestamp_sorted):
         elapsed_time_ms = round(elapsed_time, 3)
         print(f"Computed Epoch {epoch} in {elapsed_time_ms} s, PCs and T created:{len(new_halfed_pointcloud)}")
 
+    print(f"Max filtered pointcloud size: {max_filtered_pointcloud_size}")
+    print(f"Total filtered points: {total_filtered_points}")
 
-    # Estraiamo i valori di x e y
     x_values = [item[0] for item in x_y]
     y_values = [item[1] for item in x_y]
     z_values = [item[2] for item in x_y]
 
+    return new_halfed_pointcloud[0] , trajectory_deltas
 
 
-
-    plot_trajectory_3d(timestamp_dict)
-
-
-    return new_halfed_pointcloud[0]
 
 def get_timestamp(file_name):
     timestamp_str = file_name.split('_')[1].split('.ply')[0]
@@ -645,7 +671,7 @@ if 1:
         interpolated_gnss_data = LOCALIZE.align_gnss_trajectory(interpolated_gnss_data)
 
 
-        LOCALIZE.plot_gnss_data(interpolated_gnss_data)
+        #LOCALIZE.plot_gnss_data(interpolated_gnss_data)
 
         #LOCALIZE.scykit_process_imu(imu_file)
 
@@ -654,8 +680,10 @@ if 1:
         #LOCALIZE.plot_translations_double_confront(gnss_timestamps, trajectory_gnss, timestamps_imu, trajectory_imu)
 
         interpolated_data = LOCALIZE.interpolate_imu_gnss(timestamps_imu,rotations,interpolated_gnss_data)
-        LOCALIZE.plot_interpolated_data(interpolated_data)
-        LOCALIZE.plot_3d_trajectory_with_arrows(interpolated_data)
+        PLOT.plot_interpolated_data(interpolated_data)
+
+
+        PLOT.plot_3d_trajectory_with_arrows(interpolated_data)
 
         # Plot the translations
 
@@ -670,12 +698,12 @@ if 1:
         # LOCALIZE.plot_rotations(timestamps, rotations)
 
         # Plot the 3D trajectory
-        LOCALIZE.plot_trajectory_3d_imuu(timestamps_imu, trajectory_imu, rotations)
+        #LOCALIZE.plot_trajectory_3d_imuu(timestamps_imu, trajectory_imu, rotations)
 
 
 
 
-        sys.exit()
+
 
 
     SHOW_RGB_MKV = 0
@@ -713,7 +741,7 @@ if 1:
         transform_all_lower_pc_plus_icp_registration(output_folder_pc_1, output_folder_pc_2, initial_trasform_fixed_high_camera,coupled_saving_folder)
         # take this list of pointclpouds and save with: pointcloud_<timestamp> in a given folder
         # save here : coupled_saving_folder
-        sys.exit()
+
     # define the initial trasformation between the upper and lower kinect
     # zippa le coppie di pointcloud basandoti sul loro timestamp
     # and then peorform ICP to fuse upper and lower PC
@@ -737,8 +765,8 @@ if 1:
         pointcloud_files_sorted = []
 
     print("total PCs", len(pointcloud_files))
-    starts = 200
-    ends = 2000
+    starts = 2000
+    ends = 2900
 
     print("analizing: S:", starts, " E:", ends, " TOT:", ends-starts)
     timestamp_sorted = []
@@ -758,11 +786,26 @@ if 1:
             timestamp_sorted.append(timestamp)
 
 
+    downsampled_gnss_imu = LOCALIZE.downsample_interpolated_data_to_slam(timestamp_sorted,interpolated_data)
 
-    fused = hierarchy_slam_icp(pointclouds,timestamp_sorted)
+
+    voxel = 0.06
+
+    fused, trajectory_deltas = hierarchy_slam_icp(pointclouds,timestamp_sorted, downsampled_gnss_imu, voxel)
     filename = "output_double/fused.ply"
     o3d.io.write_point_cloud(filename, fused)
     print(f"PointCloud salvata come {filename}")
+
+
+
+    # now coupled
+    print("COUPLED TIMESTAMP")
+    PLOT.plot_trajectory_2d_FROM_COUPLED_DELTAS(trajectory_deltas)
+    PLOT.plot_3d_trajectory_from_coupled_deltas(trajectory_deltas)
+    PLOT.plot_angles_2d_FROM_COUPLED_DELTAS(trajectory_deltas)
+
+
+
 
 
     visualize_pc(fused,"end")

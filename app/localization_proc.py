@@ -16,7 +16,94 @@ from skinematics.quat import Quaternion
 from scipy.spatial.transform import Rotation as R
 from ahrs.filters import Madgwick
 from ahrs.common.orientation import q_rot
+import plotter as PLOT
+def downsample_interpolated_data_to_slam(slam_timestamps, interpolated_data):
+    """
+    Downsample IMU + GNSS interpolated data to match SLAM timestamps and normalize the data to start from zero.
 
+    Parameters:
+        slam_timestamps (list): List of SLAM timestamps.
+        interpolated_data (dict): Dictionary containing IMU rotations and GNSS positions with timestamps as keys.
+
+    Returns:
+        downsampled_data (dict): Interpolated IMU + GNSS data to match SLAM timestamps, normalized to start from zero.
+    """
+    # Sort SLAM timestamps
+    slam_timestamps = sorted(slam_timestamps)
+
+    # Extract IMU + GNSS timestamps and values
+    imu_gnss_timestamps = np.array(sorted(interpolated_data.keys()))
+
+    # Convert GNSS timestamps to match SLAM format by adding an appropriate offset
+    # Assuming GNSS timestamps are in seconds, convert them to match SLAM timestamps (which are in nanoseconds)
+    imu_gnss_timestamps = imu_gnss_timestamps * 1e9  # Convert seconds to nanoseconds
+
+    # Extract the positions and rotations
+    imu_gnss_positions = np.array([[
+        interpolated_data[t]['position']['x'],
+        interpolated_data[t]['position']['y'],
+        interpolated_data[t]['position']['z']] for t in interpolated_data.keys()])
+    imu_gnss_rotations = np.array([[
+        interpolated_data[t]['rotation']['x'],
+        interpolated_data[t]['rotation']['y'],
+        interpolated_data[t]['rotation']['z']] for t in interpolated_data.keys()])
+
+    # Invert X and Y axes to match SLAM data
+    #imu_gnss_positions[:, [0, 1]] = imu_gnss_positions[:, [1, 0]]
+
+    # Adjust the rotations after swapping X and Y
+    # imu_gnss_rotations[:, [0, 1]] = imu_gnss_rotations[:, [1, 0]]
+    # imu_gnss_rotations[:, 1] *= -1  # Invert pitch (Y-axis rotation)
+    # imu_gnss_rotations[:, 2] *= -1  # Invert yaw (Z-axis rotation)
+
+    # Determine the common time range
+    start_time = max(slam_timestamps[0], imu_gnss_timestamps[0])
+    end_time = min(slam_timestamps[-1], imu_gnss_timestamps[-1])
+    valid_slam_timestamps = [t for t in slam_timestamps if start_time <= t <= end_time]
+
+    # Interpolate IMU + GNSS positions to match SLAM timestamps
+    interp_func_x = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 0], kind='linear', fill_value="extrapolate")
+    interp_func_y = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 1], kind='linear', fill_value="extrapolate")
+    interp_func_z = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 2], kind='linear', fill_value="extrapolate")
+
+    # Interpolate IMU rotations to match SLAM timestamps
+    interp_func_roll = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 0], kind='linear', fill_value="extrapolate")
+    interp_func_pitch = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 1], kind='linear', fill_value="extrapolate")
+    interp_func_yaw = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 2], kind='linear', fill_value="extrapolate")
+
+    # Create the downsampled dictionary
+    downsampled_data = {}
+    for t in valid_slam_timestamps:
+        downsampled_data[t] = {
+            'rotation': {
+                'x': interp_func_roll(t),
+                'y': interp_func_pitch(t),
+                'z': interp_func_yaw(t)
+            },
+            'position': {
+                'x': interp_func_x(t),
+                'y': interp_func_y(t),
+                'z': interp_func_z(t)
+            }
+        }
+
+    # Normalize positions and rotations to start from zero after interpolation
+    first_position = np.array([downsampled_data[valid_slam_timestamps[0]]['position']['x'],
+                               downsampled_data[valid_slam_timestamps[0]]['position']['y'],
+                               downsampled_data[valid_slam_timestamps[0]]['position']['z']])
+    first_rotation = np.array([downsampled_data[valid_slam_timestamps[0]]['rotation']['x'],
+                               downsampled_data[valid_slam_timestamps[0]]['rotation']['y'],
+                               downsampled_data[valid_slam_timestamps[0]]['rotation']['z']])
+
+    for t in valid_slam_timestamps:
+        downsampled_data[t]['position']['x'] -= first_position[0]
+        downsampled_data[t]['position']['y'] -= first_position[1]
+        downsampled_data[t]['position']['z'] -= first_position[2]
+        downsampled_data[t]['rotation']['x'] -= first_rotation[0]
+        downsampled_data[t]['rotation']['y'] -= first_rotation[1]
+        downsampled_data[t]['rotation']['z'] -= first_rotation[2]
+
+    return downsampled_data
 def align_gnss_trajectory(gnss_data_processed):
     """
     Align GNSS trajectory so that the initial motion is along the X direction (1, 0, 0),
@@ -72,107 +159,13 @@ def align_gnss_trajectory(gnss_data_processed):
 
     return aligned_gnss_data_processed
 
-def plot_3d_trajectory_with_arrows(interpolated_data):
-    """
-    Plot 3D trajectory of positions and highlight the starting point.
-
-    Parameters:
-        interpolated_data (dict): Dictionary containing timestamps, positions.
-    """
-    # Extract data from the dictionary
-    timestamps = list(interpolated_data.keys())
-    positions = np.array([[interpolated_data[t]['position']['x'],
-                           interpolated_data[t]['position']['y'],
-                           interpolated_data[t]['position']['z']] for t in timestamps])
-
-    # Create 3D plot
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
-    # Plot the entire trajectory
-    ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], label='Trajectory', color='b')
-
-    # Highlight the starting point
-    ax.scatter(positions[0, 0], positions[0, 1], positions[0, 2], color='g', s=100, label='Start Point', marker='o')
-
-    # Set labels and title
-    ax.set_xlabel('X Position (m)')
-    ax.set_ylabel('Y Position (m)')
-    ax.set_zlabel('Z Position (m)')
-    ax.set_title('3D Trajectory with Start Point Highlighted')
-
-    # Setting equal scaling for all axes
-    ax.set_box_aspect([np.ptp(positions[:, 0]), np.ptp(positions[:, 1]), np.ptp(positions[:, 2])])
-
-    ax.legend()
-    plt.show()
-
-
-
-
-def plot_interpolated_data(interpolated_data):
-    """
-    Plot positions (x, y, z) and rotations (x, y, z) in function of timestamps.
-
-    Parameters:
-        interpolated_data (dict): Dictionary containing timestamps, rotations, and positions.
-    """
-    # Extract data from the dictionary
-    timestamps = list(interpolated_data.keys())
-    positions_x = [interpolated_data[t]['position']['x'] for t in timestamps]
-    positions_y = [interpolated_data[t]['position']['y'] for t in timestamps]
-    positions_z = [interpolated_data[t]['position']['z'] for t in timestamps]
-    rotations_x = [interpolated_data[t]['rotation']['x'] for t in timestamps]
-    rotations_y = [interpolated_data[t]['rotation']['y'] for t in timestamps]
-    rotations_z = [interpolated_data[t]['rotation']['z'] for t in timestamps]
-
-    # Create subplots for positions and rotations
-    fig, ax = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle('Positions and Rotations Over Time', fontsize=16)
-
-    # Plot positions
-    ax[0, 0].plot(timestamps, positions_x, label='X Position')
-    ax[0, 0].set_xlabel('Timestamp (s)')
-    ax[0, 0].set_ylabel('Position (m)')
-    ax[0, 0].set_title('X Position')
-
-    ax[0, 1].plot(timestamps, positions_y, label='Y Position')
-    ax[0, 1].set_xlabel('Timestamp (s)')
-    ax[0, 1].set_ylabel('Position (m)')
-    ax[0, 1].set_title('Y Position')
-
-    ax[0, 2].plot(timestamps, positions_z, label='Z Position')
-    ax[0, 2].set_xlabel('Timestamp (s)')
-    ax[0, 2].set_ylabel('Position (m)')
-    ax[0, 2].set_title('Z Position')
-
-    # Plot rotations
-    ax[1, 0].plot(timestamps, rotations_x, label='X Rotation')
-    ax[1, 0].set_xlabel('Timestamp (s)')
-    ax[1, 0].set_ylabel('Rotation (rad)')
-    ax[1, 0].set_title('X Rotation')
-
-    ax[1, 1].plot(timestamps, rotations_y, label='Y Rotation')
-    ax[1, 1].set_xlabel('Timestamp (s)')
-    ax[1, 1].set_ylabel('Rotation (rad)')
-    ax[1, 1].set_title('Y Rotation')
-
-    ax[1, 2].plot(timestamps, rotations_z, label='Z Rotation')
-    ax[1, 2].set_xlabel('Timestamp (s)')
-    ax[1, 2].set_ylabel('Rotation (rad)')
-    ax[1, 2].set_title('Z Rotation')
-
-    # Improve layout
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.show()
-
 def interpolate_imu_gnss(imu_timestamps, imu_rotations, gnss_data_processed):
     """
     Interpolate GNSS positions to match IMU timestamps and associate IMU rotations.
 
     Parameters:
         imu_timestamps (array): Timestamps of IMU data.
-        imu_rotations (array): Rotations from IMU data.
+        imu_rotations (array): Rotations from IMU data (in degrees).
         gnss_data_processed (dict): Processed GNSS data with timestamp keys and position values.
 
     Returns:
@@ -189,7 +182,7 @@ def interpolate_imu_gnss(imu_timestamps, imu_rotations, gnss_data_processed):
 
     # Convert inputs to numpy arrays for easier processing
     imu_timestamps = np.array(imu_timestamps)
-    imu_rotations = np.array(imu_rotations)
+    imu_rotations = np.radians(np.array(imu_rotations))  # Convert rotations to radians
     gnss_timestamps = np.array(gnss_timestamps)
     gnss_positions = np.array(gnss_positions)
 
@@ -207,15 +200,16 @@ def interpolate_imu_gnss(imu_timestamps, imu_rotations, gnss_data_processed):
     interpolated_positions = np.vstack((interpolated_x, interpolated_y, interpolated_z)).T
 
     # Normalize the rotations to start from zero
-    initial_rotation = R.from_euler('xyz', imu_rotations[0], degrees=True)
+    initial_rotation = R.from_euler('xyz', imu_rotations[0])
     adjusted_rotations = []
 
     for rotation in imu_rotations:
-        current_rotation = R.from_euler('xyz', rotation, degrees=True)
+        current_rotation = R.from_euler('xyz', rotation)
         relative_rotation = current_rotation * initial_rotation.inv()
-        adjusted_rotations.append(relative_rotation.as_euler('xyz', degrees=True))
+        adjusted_rotations.append(relative_rotation.as_euler('xyz'))
 
-    adjusted_rotations = np.array(adjusted_rotations)
+    adjusted_rotations = np.array(adjusted_rotations)  # Keep rotations in radians
+
 
     # Create output dictionary
     interpolated_data = {}
@@ -234,6 +228,7 @@ def interpolate_imu_gnss(imu_timestamps, imu_rotations, gnss_data_processed):
         }
 
     return interpolated_data
+
 def rotate_gravity(gravity_vector, delta_rotation_matrix):
     """
     Ruota il vettore di gravità usando la matrice di rotazione relativa.
