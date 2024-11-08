@@ -48,13 +48,56 @@ def downsample_interpolated_data_to_slam(slam_timestamps, interpolated_data):
         interpolated_data[t]['rotation']['y'],
         interpolated_data[t]['rotation']['z']] for t in interpolated_data.keys()])
 
-    # Invert X and Y axes to match SLAM data
-    #imu_gnss_positions[:, [0, 1]] = imu_gnss_positions[:, [1, 0]]
+    # Inversione degli assi per rendere il sistema GNSS destrorso
+    imu_gnss_positions[:, 0] *= -1  # Inverti X
+    imu_gnss_positions[:, 1] *= -1  # Inverti Y
+    imu_gnss_rotations[:, 0] *= -1  # Inverti rotazione intorno a X
+    imu_gnss_rotations[:, 1] *= -1  # Inverti rotazione intorno a Y
 
-    # Adjust the rotations after swapping X and Y
-    # imu_gnss_rotations[:, [0, 1]] = imu_gnss_rotations[:, [1, 0]]
-    # imu_gnss_rotations[:, 1] *= -1  # Invert pitch (Y-axis rotation)
-    # imu_gnss_rotations[:, 2] *= -1  # Invert yaw (Z-axis rotation)
+    # Rotazione degli assi per allineare il sistema GNSS/IMU al sistema SLAM
+    # X (GNSS) -> -Y (SLAM)
+    # Y (GNSS) -> Z (SLAM)
+    # Z (GNSS) -> X (SLAM)
+    rotation_matrix = np.array([
+        [0, 0, 1],  # X (SLAM) = Z (GNSS)
+        [-1, 0, 0],  # Y (SLAM) = -X (GNSS)
+        [0, 1, 0]  # Z (SLAM) = Y (GNSS)
+    ])
+
+    # Applicare la trasformazione alle posizioni
+    imu_gnss_positions = np.dot(imu_gnss_positions, rotation_matrix.T)
+
+    # Calcolo delle rotazioni modificate come rotazioni nello spazio
+    imu_gnss_rotations_transformed = []
+    for rot in imu_gnss_rotations:
+        # Creare una rotazione da roll, pitch, yaw del GNSS/IMU
+        r_gnss = R.from_euler('xyz', rot, degrees=False)
+
+        # Applicare la trasformazione del sistema di riferimento agli assi di rotazione
+        rotation_matrix_scipy = R.from_matrix(rotation_matrix)
+        r_transformed = rotation_matrix_scipy.inv() * r_gnss * rotation_matrix_scipy
+
+        # Convertire di nuovo in angoli roll, pitch, yaw
+        transformed_rot = r_transformed.as_euler('xzy', degrees=False)
+
+        imu_gnss_rotations_transformed.append(transformed_rot)
+
+    imu_gnss_rotations = np.array(imu_gnss_rotations_transformed)
+    imu_gnss_rotations_transformed = []
+    for rot in imu_gnss_rotations:
+        # Creare una rotazione da roll, pitch, yaw del GNSS/IMU
+        r_gnss = R.from_euler('xyz', rot, degrees=False)
+
+        # Applicare la trasformazione della matrice di rotazione al sistema GNSS/IMU
+        rotation_matrix_scipy = R.from_matrix(rotation_matrix)
+        r_transformed = rotation_matrix_scipy * r_gnss
+
+        # Convertire di nuovo in angoli roll, pitch, yaw
+        transformed_rot = r_transformed.as_euler('xyz', degrees=False)
+
+        imu_gnss_rotations_transformed.append(transformed_rot)
+
+    imu_gnss_rotations = np.array(imu_gnss_rotations_transformed)
 
     # Determine the common time range
     start_time = max(slam_timestamps[0], imu_gnss_timestamps[0])
