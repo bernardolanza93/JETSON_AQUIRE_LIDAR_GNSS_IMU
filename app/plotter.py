@@ -1,6 +1,144 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import open3d as o3d
+def visualize_pc_with_trajectory(pc, trajectory_deltas):
+    # Creare una finestra di visualizzazione per la pointcloud e la traiettoria
+    point_size = 2
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(window_name="Point Cloud with Trajectory")
+
+    # Aggiungi la pointcloud ricostruita
+    vis.add_geometry(pc)
+
+    # Imposta il colore di sfondo
+    opt = vis.get_render_option()
+    opt.background_color = np.array([0.1, 0.1, 0.1])  # Colore nero
+    opt.point_size = point_size
+
+    # Creare una lista di punti per rappresentare la traiettoria
+    points = [[0, 0, 0]]  # Punto di partenza (origine)
+    for timestamp in sorted(trajectory_deltas.keys()):
+        delta = trajectory_deltas[timestamp]['slam_icp_transformation']
+        # Aggiungi la nuova posizione come punto successivo
+        last_position = points[-1]
+        new_position = [
+            last_position[0] + delta['delta_x'],
+            last_position[1] + delta['delta_y'],
+            last_position[2] + delta['delta_z']
+        ]
+        points.append(new_position)
+
+    # Creare una LineSet per collegare i punti della traiettoria
+    lines = [[i, i + 1] for i in range(len(points) - 1)]
+    line_set = o3d.geometry.LineSet(
+        points=o3d.utility.Vector3dVector(points),
+        lines=o3d.utility.Vector2iVector(lines),
+    )
+
+    # Aggiungi colori alla traiettoria per una migliore visualizzazione
+    colors = [[1, 0, 0] for _ in lines]  # Rosso per tutte le linee
+    line_set.colors = o3d.utility.Vector3dVector(colors)
+
+    # Aggiungi il LineSet alla visualizzazione
+    vis.add_geometry(line_set)
+
+    # Creare e aggiungere gli assi principali nel punto di origine
+    axis_length = 0.8  # Lunghezza degli assi
+    axis_points = [
+        [0, 0, 0], [axis_length, 0, 0],  # Asse X in rosso
+        [0, 0, 0], [0, axis_length, 0],  # Asse Y in verde
+        [0, 0, 0], [0, 0, axis_length]   # Asse Z in blu
+    ]
+    axis_lines = [[0, 1], [2, 3], [4, 5]]
+    axis_colors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]  # Colori RGB per X, Y, Z
+
+    # Creare un LineSet per gli assi
+    axis_line_set = o3d.geometry.LineSet(
+        points=o3d.utility.Vector3dVector(axis_points),
+        lines=o3d.utility.Vector2iVector(axis_lines),
+    )
+    axis_line_set.colors = o3d.utility.Vector3dVector(axis_colors)
+
+    # Aggiungi gli assi alla visualizzazione
+    vis.add_geometry(axis_line_set)
+
+    # Avvia la visualizzazione
+    vis.run()
+    vis.destroy_window()
+
+
+
+def plot_GNSS_slamFPS_trajectories(downsampled_data):
+    """
+    Plot translational and rotational data from downsampled GNSS/IMU data over time.
+
+    Parameters:
+        downsampled_data (dict): Dictionary containing interpolated GNSS/IMU data.
+    """
+    # Ordinare i timestamp
+    sorted_timestamps = sorted(downsampled_data.keys())
+    timestamps = np.array(sorted_timestamps)
+
+    # Estrarre le posizioni e le rotazioni dal dizionario
+    positions = {'x': [], 'y': [], 'z': []}
+    rotations = {'x': [], 'y': [], 'z': []}
+
+    for t in sorted_timestamps:
+        positions['x'].append(downsampled_data[t]['position']['x'])
+        positions['y'].append(downsampled_data[t]['position']['y'])
+        positions['z'].append(downsampled_data[t]['position']['z'])
+        rotations['x'].append(downsampled_data[t]['rotation']['x'])
+        rotations['y'].append(downsampled_data[t]['rotation']['y'])
+        rotations['z'].append(downsampled_data[t]['rotation']['z'])
+
+    # Creare subplots per le posizioni (x, y, z)
+    fig, axs = plt.subplots(3, 1, figsize=(10, 15))
+
+    axs[0].plot(timestamps, positions['x'], label='Translazione X', color='b')
+    axs[0].set_title('Posizione X nel Tempo')
+    axs[0].set_xlabel('Timestamp')
+    axs[0].set_ylabel('Posizione X [m]')
+    axs[0].legend()
+
+    axs[1].plot(timestamps, positions['y'], label='Translazione Y', color='g')
+    axs[1].set_title('Posizione Y nel Tempo')
+    axs[1].set_xlabel('Timestamp')
+    axs[1].set_ylabel('Posizione Y [m]')
+    axs[1].legend()
+
+    axs[2].plot(timestamps, positions['z'], label='Translazione Z', color='r')
+    axs[2].set_title('Posizione Z nel Tempo')
+    axs[2].set_xlabel('Timestamp')
+    axs[2].set_ylabel('Posizione Z [m]')
+    axs[2].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    # Creare subplots per le rotazioni (roll, pitch, yaw)
+    fig, axs = plt.subplots(3, 1, figsize=(10, 15))
+
+    axs[0].plot(timestamps, rotations['x'], label='Rotazione X (Roll)', color='b')
+    axs[0].set_title('Rotazione X (Roll) nel Tempo')
+    axs[0].set_xlabel('Timestamp')
+    axs[0].set_ylabel('Rotazione X [rad]')
+    axs[0].legend()
+
+    axs[1].plot(timestamps, rotations['y'], label='Rotazione Y (Pitch)', color='g')
+    axs[1].set_title('Rotazione Y (Pitch) nel Tempo')
+    axs[1].set_xlabel('Timestamp')
+    axs[1].set_ylabel('Rotazione Y [rad]')
+    axs[1].legend()
+
+    axs[2].plot(timestamps, rotations['z'], label='Rotazione Z (Yaw)', color='r')
+    axs[2].set_title('Rotazione Z (Yaw) nel Tempo')
+    axs[2].set_xlabel('Timestamp')
+    axs[2].set_ylabel('Rotazione Z [rad]')
+    axs[2].legend()
+
+    plt.tight_layout()
+    plt.show()
 
 
 def plot_angles_2d_FROM_COUPLED_DELTAS(trajectory_deltas):
@@ -383,7 +521,7 @@ def plot_3d_trajectory_with_arrows(interpolated_data):
 
     # Plot arrows every 200 points based on rotations
     arrow_length = 2.6  # Length of the arrow for visualization, increased by 30%
-    for i in range(0, len(positions), 200):
+    for i in range(0, len(positions), 60):
         position = positions[i]
         rotation = R.from_euler('xyz', rotations[i])  # Rotations are in radians
 

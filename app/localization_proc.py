@@ -17,6 +17,257 @@ from scipy.spatial.transform import Rotation as R
 from ahrs.filters import Madgwick
 from ahrs.common.orientation import q_rot
 import plotter as PLOT
+
+
+def moving_average(data, window_size):
+    """
+    Apply a moving average filter to 1D data with specified window size.
+    Returns data trimmed to match the length of the filtered result.
+    """
+    filtered_data = np.convolve(data, np.ones(window_size) / window_size, mode='valid')
+    return filtered_data
+def moving_average(data, window_size):
+    """
+    Apply a moving average filter to 1D data with specified window size.
+    """
+    return np.convolve(data, np.ones(window_size) / window_size, mode='same')
+def generate_gnss_based_orientation(gnss_data_processed, position_window=5, orientation_window=5):
+    """
+    Generate arbitrary orientation frames from GNSS trajectory data with moving average filtering.
+
+    Parameters:
+        gnss_data_processed (dict): Processed GNSS data with timestamp keys and position values.
+        position_window (int): Window size for the moving average filter on positions.
+        orientation_window (int): Window size for the moving average filter on orientations.
+
+    Returns:
+        interpolated_data (dict): Dictionary with filtered timestamps as keys and associated rotation and position values.
+    """
+    # Extract GNSS timestamps and positions from the processed data
+    gnss_timestamps = []
+    gnss_positions = []
+
+    for timestamp, data in gnss_data_processed.items():
+        gnss_timestamps.append(float(timestamp))
+        position = data['position']
+        gnss_positions.append([position['x'], position['y'], position['z']])
+
+    # Convert inputs to numpy arrays for easier processing
+    gnss_timestamps = np.array(gnss_timestamps)
+    gnss_positions = np.array(gnss_positions)
+
+    # Apply moving average filter to positions
+    filtered_positions = np.array([moving_average(gnss_positions[:, i], position_window) for i in range(3)]).T
+    filtered_timestamps = gnss_timestamps[position_window - 1 : -position_window + 1] if position_window > 1 else gnss_timestamps
+
+
+    # print(len(filtered_positions[:, 1]))
+    # print(len(filtered_timestamps))
+
+
+    # Initialize lists for orientations
+    roll_list, pitch_list, yaw_list = [], [], []
+
+    for i in range(1, len(filtered_positions)):
+        # Calcolo dell'asse x come vettore di spostamento
+        tangent_vector = filtered_positions[i] - filtered_positions[i - 1]
+        x_axis = tangent_vector / np.linalg.norm(tangent_vector)
+
+        # Calcolo degli assi y e z come ortogonali a x
+        y_axis = np.cross([0, 0, 1], x_axis)
+        if np.linalg.norm(y_axis) < 1e-6:
+            y_axis = np.cross([0, 1, 0], x_axis)
+        y_axis /= np.linalg.norm(y_axis)
+        z_axis = np.cross(x_axis, y_axis)
+        z_axis /= np.linalg.norm(z_axis)
+
+        # Calcolo degli angoli
+        pitch = np.arcsin(-x_axis[2])
+        roll = np.arctan2(z_axis[1], z_axis[2])
+        yaw = np.arctan2(y_axis[0], x_axis[0])
+
+        roll_list.append(roll)
+        pitch_list.append(pitch)
+        yaw_list.append(yaw)
+
+    roll_list = np.unwrap(roll_list)
+    pitch_list = np.unwrap(pitch_list)
+    yaw_list = np.unwrap(yaw_list)
+
+
+
+
+
+
+    # Filtra le rotazioni e regola la lunghezza dei timestamp
+    filtered_roll = moving_average(roll_list, orientation_window)
+    filtered_pitch = moving_average(pitch_list, orientation_window)
+    filtered_yaw = moving_average(yaw_list, orientation_window)
+
+    # Allinea i timestamp e le posizioni con la lunghezza degli angoli filtrati
+    min_length = min(len(filtered_roll), len(filtered_pitch), len(filtered_yaw), len(filtered_timestamps), len(filtered_positions))
+
+    final_timestamps = filtered_timestamps[:min_length]
+    final_positions = filtered_positions[:min_length]
+    filtered_roll = filtered_roll[:min_length]
+    filtered_pitch = filtered_pitch[:min_length]
+    filtered_yaw = filtered_yaw[:min_length]
+
+
+
+
+    # Costruzione del dizionario di output con i dati filtrati
+    interpolated_data = {}
+    for i, timestamp in enumerate(final_timestamps):
+        interpolated_data[timestamp] = {
+            'rotation': {
+                'x': filtered_roll[i],
+                'y': filtered_pitch[i],
+                'z': filtered_yaw[i]
+            },
+            'position': {
+                'x': final_positions[i, 0],
+                'y': final_positions[i, 1],
+                'z': final_positions[i, 2]
+            }
+        }
+
+    return interpolated_data
+
+
+
+def normalize_angle(angle):
+    """ Normalizza un angolo in radianti tra -π e π """
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def resample_data_to_slam_frequency(slam_timestamps, interpolated_data):
+    """
+    Resample IMU + GNSS interpolated data to match SLAM timestamps and normalize data to start from zero.
+
+    Parameters:
+        slam_timestamps (list): List of SLAM timestamps.
+        interpolated_data (dict): Dictionary containing IMU rotations and GNSS positions with timestamps as keys.
+
+    Returns:
+        resampled_data (dict): Resampled IMU + GNSS data to match SLAM timestamps, normalized to start from zero.
+    """
+    # Sort SLAM timestamps
+    slam_timestamps = sorted(slam_timestamps)
+
+    # Extract IMU + GNSS timestamps and values
+    imu_gnss_timestamps = np.array(sorted(interpolated_data.keys()))
+
+    # Convert GNSS timestamps to nanoseconds (from seconds) to match SLAM format
+    imu_gnss_timestamps = imu_gnss_timestamps * 1e9  # Convert seconds to nanoseconds
+
+    # Calculate frequencies after timestamp alignment
+    imu_gnss_frequency = 1 / np.mean(np.diff(imu_gnss_timestamps)) * 1e9
+    slam_frequency = 1 / np.mean(np.diff(slam_timestamps)) * 1e9
+
+
+    # Extract the positions and rotations
+    imu_gnss_positions = np.array([[
+        interpolated_data[t]['position']['x'],
+        interpolated_data[t]['position']['y'],
+        interpolated_data[t]['position']['z']] for t in interpolated_data.keys()])
+    imu_gnss_rotations = np.array([[
+        interpolated_data[t]['rotation']['x'],
+        interpolated_data[t]['rotation']['y'],
+        interpolated_data[t]['rotation']['z']] for t in interpolated_data.keys()])
+
+
+
+    imu_gnss_positions_transformed = []
+    for pos in imu_gnss_positions:
+        transformed_pos = [
+            -pos[2],
+            pos[0],
+            -pos[1]
+        ]
+        imu_gnss_positions_transformed.append(transformed_pos)
+    imu_gnss_positions = np.array(imu_gnss_positions_transformed)
+
+
+    imu_gnss_rotations_transformed = []
+    for rot in imu_gnss_rotations:
+        transformed_rot = [
+            -rot[2],
+            rot[0],
+            -rot[1]
+        ]
+        imu_gnss_rotations_transformed.append(transformed_rot)
+    imu_gnss_rotations = np.array(imu_gnss_rotations_transformed)
+
+
+    print("GNSS FREQ",imu_gnss_frequency)
+    print("SLAM FREQ", slam_frequency)
+
+    # Set up resampling to match SLAM timestamps
+    if imu_gnss_frequency < slam_frequency:
+        print("ONLY GNSS!!!")
+        # Upsample GNSS/IMU data to SLAM frequency
+        interp_func_x = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 0], kind='linear', fill_value="extrapolate")
+        interp_func_y = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 1], kind='linear', fill_value="extrapolate")
+        interp_func_z = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 2], kind='linear', fill_value="extrapolate")
+
+        interp_func_roll = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 0], kind='linear',
+                                    fill_value="extrapolate")
+        interp_func_pitch = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 1], kind='linear',
+                                     fill_value="extrapolate")
+        interp_func_yaw = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 2], kind='linear',
+                                   fill_value="extrapolate")
+    else:
+        # Downsample GNSS/IMU data to SLAM frequency
+        interp_func_x = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 0], kind='nearest',
+                                 fill_value="extrapolate")
+        interp_func_y = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 1], kind='nearest',
+                                 fill_value="extrapolate")
+        interp_func_z = interp1d(imu_gnss_timestamps, imu_gnss_positions[:, 2], kind='nearest',
+                                 fill_value="extrapolate")
+
+        interp_func_roll = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 0], kind='nearest',
+                                    fill_value="extrapolate")
+        interp_func_pitch = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 1], kind='nearest',
+                                     fill_value="extrapolate")
+        interp_func_yaw = interp1d(imu_gnss_timestamps, imu_gnss_rotations[:, 2], kind='nearest',
+                                   fill_value="extrapolate")
+
+    # Build the output dictionary
+    resampled_data = {}
+    for t in slam_timestamps:
+        resampled_data[t] = {
+            'rotation': {
+                'x': interp_func_roll(t),
+                'y': interp_func_pitch(t),
+                'z': interp_func_yaw(t)
+            },
+            'position': {
+                'x': interp_func_x(t),
+                'y': interp_func_y(t),
+                'z': interp_func_z(t)
+            }
+        }
+
+    # Normalize positions and rotations
+    first_position = np.array([resampled_data[slam_timestamps[0]]['position']['x'],
+                               resampled_data[slam_timestamps[0]]['position']['y'],
+                               resampled_data[slam_timestamps[0]]['position']['z']])
+    first_rotation = np.array([resampled_data[slam_timestamps[0]]['rotation']['x'],
+                               resampled_data[slam_timestamps[0]]['rotation']['y'],
+                               resampled_data[slam_timestamps[0]]['rotation']['z']])
+
+    for t in slam_timestamps:
+        resampled_data[t]['position']['x'] -= first_position[0]
+        resampled_data[t]['position']['y'] -= first_position[1]
+        resampled_data[t]['position']['z'] -= first_position[2]
+        resampled_data[t]['rotation']['x'] -= first_rotation[0]
+        resampled_data[t]['rotation']['y'] -= first_rotation[1]
+        resampled_data[t]['rotation']['z'] -= first_rotation[2]
+
+    return resampled_data
+
+
 def downsample_interpolated_data_to_slam(slam_timestamps, interpolated_data):
     """
     Downsample IMU + GNSS interpolated data to match SLAM timestamps and normalize the data to start from zero.
@@ -49,19 +300,19 @@ def downsample_interpolated_data_to_slam(slam_timestamps, interpolated_data):
         interpolated_data[t]['rotation']['z']] for t in interpolated_data.keys()])
 
     # Inversione degli assi per rendere il sistema GNSS destrorso
-    imu_gnss_positions[:, 0] *= -1  # Inverti X
-    imu_gnss_positions[:, 1] *= -1  # Inverti Y
+    imu_gnss_positions[:, 0] *= 1  # Inverti X
+    imu_gnss_positions[:, 1] *= 1  # Inverti Y
     imu_gnss_rotations[:, 0] *= -1  # Inverti rotazione intorno a X
     imu_gnss_rotations[:, 1] *= -1  # Inverti rotazione intorno a Y
 
     # Rotazione degli assi per allineare il sistema GNSS/IMU al sistema SLAM
-    # X (GNSS) -> -Y (SLAM)
-    # Y (GNSS) -> Z (SLAM)
-    # Z (GNSS) -> X (SLAM)
+    # X (GNSS) -> Y (SLAM)
+    # Y (GNSS) -> -Z (SLAM)
+    # Z (GNSS) -> -X (SLAM)
     rotation_matrix = np.array([
-        [0, 0, 1],  # X (SLAM) = Z (GNSS)
-        [-1, 0, 0],  # Y (SLAM) = -X (GNSS)
-        [0, 1, 0]  # Z (SLAM) = Y (GNSS)
+        [0, 0, -1],  # X (SLAM) = -Z (GNSS)
+        [1, 0, 0],  # Y (SLAM) = X (GNSS)
+        [0, -1, 0]  # Z (SLAM) = -Y (GNSS)
     ])
 
     # Applicare la trasformazione alle posizioni
@@ -70,34 +321,18 @@ def downsample_interpolated_data_to_slam(slam_timestamps, interpolated_data):
     # Calcolo delle rotazioni modificate come rotazioni nello spazio
     imu_gnss_rotations_transformed = []
     for rot in imu_gnss_rotations:
-        # Creare una rotazione da roll, pitch, yaw del GNSS/IMU
-        r_gnss = R.from_euler('xyz', rot, degrees=False)
-
-        # Applicare la trasformazione del sistema di riferimento agli assi di rotazione
-        rotation_matrix_scipy = R.from_matrix(rotation_matrix)
-        r_transformed = rotation_matrix_scipy.inv() * r_gnss * rotation_matrix_scipy
-
-        # Convertire di nuovo in angoli roll, pitch, yaw
-        transformed_rot = r_transformed.as_euler('xzy', degrees=False)
+        # Scambiare i valori degli angoli per allineare con il nuovo sistema di riferimento
+        transformed_rot = [
+            rot[2],  # L'angolo di rotazione Z del GNSS diventa X del SLAM
+            rot[0],  # L'angolo di rotazione X del GNSS diventa Y del SLAM
+            -rot[1]  # L'angolo di rotazione Y del GNSS diventa -Z del SLAM
+        ]
 
         imu_gnss_rotations_transformed.append(transformed_rot)
 
     imu_gnss_rotations = np.array(imu_gnss_rotations_transformed)
-    imu_gnss_rotations_transformed = []
-    for rot in imu_gnss_rotations:
-        # Creare una rotazione da roll, pitch, yaw del GNSS/IMU
-        r_gnss = R.from_euler('xyz', rot, degrees=False)
 
-        # Applicare la trasformazione della matrice di rotazione al sistema GNSS/IMU
-        rotation_matrix_scipy = R.from_matrix(rotation_matrix)
-        r_transformed = rotation_matrix_scipy * r_gnss
 
-        # Convertire di nuovo in angoli roll, pitch, yaw
-        transformed_rot = r_transformed.as_euler('xyz', degrees=False)
-
-        imu_gnss_rotations_transformed.append(transformed_rot)
-
-    imu_gnss_rotations = np.array(imu_gnss_rotations_transformed)
 
     # Determine the common time range
     start_time = max(slam_timestamps[0], imu_gnss_timestamps[0])
@@ -201,6 +436,10 @@ def align_gnss_trajectory(gnss_data_processed):
         }
 
     return aligned_gnss_data_processed
+
+
+
+
 
 def interpolate_imu_gnss(imu_timestamps, imu_rotations, gnss_data_processed):
     """
