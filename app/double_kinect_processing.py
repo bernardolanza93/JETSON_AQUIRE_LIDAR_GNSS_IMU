@@ -378,35 +378,48 @@ def correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_time
             'y': delta_angle(previous_trajectory['rotation']['y'], current_trajectory['rotation']['y']),
             'z': delta_angle(previous_trajectory['rotation']['z'], current_trajectory['rotation']['z'])
         }
+        # Step 1: Calcola la matrice di rotazione globale corrente usando gli angoli assoluti
+        rot_x_global = R.from_euler('x', current_trajectory['rotation']['x'], degrees=False).as_matrix()
+        rot_y_global = R.from_euler('y', current_trajectory['rotation']['y'], degrees=False).as_matrix()
+        rot_z_global = R.from_euler('z', current_trajectory['rotation']['z'], degrees=False).as_matrix()
 
 
+        # TRASLAZIONI GLOBALI
+        global_combined_translation = np.array([delta_position['x'], delta_position['y'], delta_position['z']])
+        # print("ANGLE:", current_trajectory['rotation']['x'])
+        # print("GLOBAL:", global_combined_translation[1])
+        # Matrice di rotazione globale corrente
+        rotation_matrix_global = rot_z_global @ rot_y_global @ rot_x_global
 
+        # Step 2: Ruota il vettore delta_position nel sistema locale di L2
+        local_traslation_vector = np.linalg.inv(rotation_matrix_global) @ global_combined_translation
+        # print("CORRECTED:", local_traslation_vector[1])
+
+
+        final_translation = np.array(local_traslation_vector)
 
         if no_pc:
-            #print(" NO SLAM")
-            # Utilizza direttamente la trasformazione GNSS/IMU senza mediazione
-            # Crea le rotazioni singolarmente
-            rot_x = R.from_euler('x', delta_rotation['x'], degrees=False).as_matrix()
-            rot_y = R.from_euler('y', delta_rotation['y'], degrees=False).as_matrix()
-            rot_z = R.from_euler('z', delta_rotation['z'], degrees=False).as_matrix()
 
+            # Step 3: Crea la matrice di rotazione incrementale usando i delta angoli tra L1 e L2
+            rot_x_incremental = R.from_euler('x', delta_rotation['x'], degrees=False).as_matrix()
+            rot_y_incremental = R.from_euler('y', delta_rotation['y'], degrees=False).as_matrix()
+            rot_z_incremental = R.from_euler('z', delta_rotation['z'], degrees=False).as_matrix()
 
-            # rot_x = R.from_euler('x', delta_rotation['x'], degrees=False).as_matrix()
-            # rot_y = R.from_euler('y', 0, degrees=False).as_matrix()
-            # rot_z = R.from_euler('z', 0, degrees=False).as_matrix()
+            # Matrizia di rotazione incrementale
+            combined_rotation_matrix = rot_z_incremental @ rot_y_incremental @ rot_x_incremental
 
-
-            # Combina le rotazioni nell'ordine desiderato per una rotazione estrinseca
-            # (rotazione globale nell'ordine x, poi y, poi z)
-            combined_rotation_matrix = rot_x @ rot_y @ rot_z
-
+            # Step 4: Costruisci la matrice di trasformazione finale tra L1 e L2
+            T_L1_L2 = np.eye(4)  # Matrice identità 4x4
+            T_L1_L2[:3, :3] = combined_rotation_matrix
+            T_L1_L2[:3, 3] = final_translation
+            global_trj_contribution = global_combined_translation
 
 
 
-
-
-            combined_translation = np.array([delta_position['x'], delta_position['y'], delta_position['z']])
         else:
+            #DA SISTEMARE QUIIIIII COME SOPRA
+
+
             # Converti la matrice di rotazione in quaternione per l'ICP
             icp_rotation_matrix = np.array(updated_trasform_icp_result[:3, :3], copy=True)
             icp_quaternion = R.from_matrix(icp_rotation_matrix).as_quat()
@@ -424,17 +437,20 @@ def correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_time
 
             # Calcola la traslazione mediata
             delta_translation_icp = updated_trasform_icp_result[:3, 3]
-            delta_translation_gnss = np.array([delta_position['x'], delta_position['y'], delta_position['z']])
-            combined_translation = w_icp * delta_translation_icp + w_gnss * delta_translation_gnss
+            final_translation = w_icp * delta_translation_icp + w_gnss * local_traslation_vector
+            global_trj_contribution = rotation_matrix_global @ final_translation
 
         # Ricostruisci la matrice di trasformazione 4x4
         combined_transformation = np.eye(4)
         combined_transformation[:3, :3] = combined_rotation_matrix
-        combined_transformation[:3, 3] = combined_translation
+        combined_transformation[:3, 3] = final_translation
     else:
-
+        print("FIRST FRAME")
         combined_transformation = np.eye(4)
-    return combined_transformation
+        global_trj_contribution = [0,0,0]
+        final_translation = [0,0,0]
+
+    return combined_transformation, global_trj_contribution, final_translation
 
 
 def incremental_plot(downsampled_data):
@@ -534,7 +550,7 @@ def flatten_first_level(nested_list):
     return result
 
 @timeit
-def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, VOXEL_VOLUME,w_icp=0.9, w_gnss=0.1):
+def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, VOXEL_VOLUME,w_icp=0.001, w_gnss=0.999):
     # devo saltare la zero che è solo target
     # prendo la sua trasformata trovata tra le sotto pc e la applico alla coppia dopo
     # current_source.trasform(last_epoch_trasformation[i-1])
@@ -553,9 +569,6 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
 
     #incremental_plot(downsampled_data)
 
-
-
-
     # al primo giro prendo PC grezze
     epoch_start_pointclouds = input_all_pointcloud
     epoch = 0
@@ -565,11 +578,11 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
     bernardo_timestamp_dictionary = {}
     bernardo_timestamp_list = []
 
-
     max_filtered_pointcloud_size = 0
     total_filtered_points = 0
 
     trajectory_deltas = {}
+    local_displ_deltas = []
 
     while len(epoch_start_pointclouds) > 1:
         start_time = time.time()
@@ -609,14 +622,6 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                     bernardo_empty_list_timestamp.append([bernardo_timestamp_list[i-1],bernardo_timestamp_list[i]])
                     current_timestamp = min(bernardo_timestamp_list[i])
                     previous_timestamp = max(bernardo_timestamp_list[i-1])
-
-
-
-                # Timestamp di riferimento: più recente del source e precedente del target
-
-
-
-                # Aggiorna la mappa dei timestamp per la nuova pointcloud fusa
 
 
 
@@ -674,24 +679,19 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
 
 
 
-
-
-
-
-
-                if 1:
-                #if len(filtered_source.points) < 200 or len(filtered_target.points) < 200:
-                    updated_trasform_icp_result = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
+                #if 1:
+                if len(filtered_source.points) < 200 or len(filtered_target.points) < 200:
+                    updated_trasform_icp_result, global_trnslation, local_translation = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
                                                                             current_timestamp,
                                                                             0, w_icp,
                                                                             w_gnss, True)
                 else:
                     updated_trasform_icp_result_raw = CUSTOM_SLAM.icp_open3d(filtered_source, filtered_target, 0.05, 200)
-                    updated_trasform_icp_result = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
+                    updated_trasform_icp_result, global_trnslation, local_translation = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
                                                                             current_timestamp,
                                                                             updated_trasform_icp_result_raw, w_icp,
                                                                             w_gnss)
-
+                local_displ_deltas.append(local_translation)
                 if previous_timestamp is not None:
                     # Estrarre la trasformazione corrispondente dalla traiettoria GNSS e IMU
                     current_trajectory = downsampled_data.get(current_timestamp)
@@ -713,54 +713,13 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                     delta_position = {'x': 0, 'y': 0, 'z': 0}
                     delta_rotation = {'x': 0, 'y': 0, 'z': 0}
 
-                # Creare un dizionario per la fusione corrente con la trasformazione stimata dallo SLAM ICP e il delta GNSS/IMU
-                trajectory_deltas[current_timestamp] = {
-                    'slam_icp_transformation': {
-                        'delta_x': updated_trasform_icp_result[0, 3],
-                        'delta_y': updated_trasform_icp_result[1, 3],
-                        'delta_z': updated_trasform_icp_result[2, 3],
-                        'rotation_matrix': updated_trasform_icp_result[:3, :3].tolist()
-                    },
-                    'gnss_imu_transformation': {
-                        'delta_x': delta_position['x'],
-                        'delta_y': delta_position['y'],
-                        'delta_z': delta_position['z'],
-                        'delta_rotation_x': delta_rotation['x'],
-                        'delta_rotation_y': delta_rotation['y'],
-                        'delta_rotation_z': delta_rotation['z']
-                    }
-                }
-
-                # Estrarre il timestamp associato
-
-
-                # Estrarre la trasformazione corrispondente dalla traiettoria GNSS e IMU
-                current_trajectory = downsampled_data.get(current_timestamp)
-                previous_trajectory = downsampled_data[previous_timestamp] if previous_timestamp in downsampled_data else None
-
-                if previous_trajectory is not None:
-                    # Calcolare il delta della traiettoria tra il timestamp corrente e quello precedente
-                    delta_position = {
-                        'x': current_trajectory['position']['x'] - previous_trajectory['position']['x'],
-                        'y': current_trajectory['position']['y'] - previous_trajectory['position']['y'],
-                        'z': current_trajectory['position']['z'] - previous_trajectory['position']['z']
-                    }
-                    delta_rotation = {
-                        'x': current_trajectory['rotation']['x'] - previous_trajectory['rotation']['x'],
-                        'y': current_trajectory['rotation']['y'] - previous_trajectory['rotation']['y'],
-                        'z': current_trajectory['rotation']['z'] - previous_trajectory['rotation']['z']
-                    }
-                else:
-                    # Se non c'è una traiettoria precedente, il delta è considerato zero
-                    delta_position = {'x': 0, 'y': 0, 'z': 0}
-                    delta_rotation = {'x': 0, 'y': 0, 'z': 0}
 
                 # Creare un dizionario per la fusione corrente con la trasformazione stimata dallo SLAM ICP e il delta GNSS/IMU
                 trajectory_deltas[current_timestamp] = {
                     'slam_icp_transformation': {
-                        'delta_x': updated_trasform_icp_result[0, 3],
-                        'delta_y': updated_trasform_icp_result[1, 3],
-                        'delta_z': updated_trasform_icp_result[2, 3],
+                        'delta_x': global_trnslation[0],
+                        'delta_y': global_trnslation[1],
+                        'delta_z': global_trnslation[2],
                         'delta_rotation_x': np.arctan2(updated_trasform_icp_result[2, 1], updated_trasform_icp_result[2, 2]),
                         'delta_rotation_y': np.arcsin(-updated_trasform_icp_result[2, 0]),
                         'delta_rotation_z': np.arctan2(updated_trasform_icp_result[1, 0], updated_trasform_icp_result[0, 0]),
@@ -775,20 +734,13 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                         'delta_rotation_z': delta_rotation['z']
                     }
                 }
-                x_y.append(updated_trasform_icp_result[0, -3:])
                 total_trasformation_prior_plus_icp = np.dot(prior_trasformation_composed, updated_trasform_icp_result)
 
                 trasformed_icp_source = o3d.geometry.PointCloud(current_source)
                 trasformed_icp_source.transform(updated_trasform_icp_result)
 
-                # Creazione degli assi di riferimento
-
-
-
                 merged_pcd = target + trasformed_icp_source
                 merged_pcd = remove_isolated_points(merged_pcd, nb_neighbors=12, radius=0.4)
-
-
                 trasformation_current.append(total_trasformation_prior_plus_icp)
                 new_halfed_pointcloud.append(merged_pcd)
 
@@ -804,13 +756,8 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
 
 
                     last_trasaform = (last_epoch_trasformation[i + 1])
-
-
-
-
                     trasformation_current.append(last_trasaform)
                     new_halfed_pointcloud.append(last_pc)
-
 
 
 
@@ -830,10 +777,7 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
         print(f"Computed Epoch {epoch} in {elapsed_time_ms} s, PCs and T created:{len(new_halfed_pointcloud)}")
 
 
-
-    x_values = [item[0] for item in x_y]
-    y_values = [item[1] for item in x_y]
-    z_values = [item[2] for item in x_y]
+    PLOT.plot_local_displacement_deltas(local_displ_deltas)
 
 
 
@@ -969,11 +913,13 @@ if 1:
         pointcloud_files_sorted = []
 
     print("total PCs", len(pointcloud_files))
-    starts = 1900
-    ends = 2500
+    starts = 1000
+    ends = 2800
     # starts = 500
-    # ends = 750
-    voxel = 0.05
+    # ends = 1000
+    # starts = 2500
+    # ends = 3000
+    voxel = 0.1
 
     print("analizing: S:", starts, " E:", ends, " TOT:", ends-starts)
     timestamp_sorted = []
@@ -996,8 +942,7 @@ if 1:
     #downsampled_gnss_imu = LOCALIZE.downsample_interpolated_data_to_slam(timestamp_sorted,interpolated_data)
     #IMU NON APPLICATO - FRQUENZA NATURALE GNSS < SLAM
     downsampled_gnss_imu = LOCALIZE.resample_data_to_slam_frequency(timestamp_sorted,interpolated_data)
-
-
+    PLOT.plot_GNSS_slamFPS_trajectories(downsampled_gnss_imu)
 
     if 0:
         PLOT.plot_GNSS_slamFPS_trajectories(downsampled_gnss_imu)
