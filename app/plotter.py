@@ -2,6 +2,43 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import open3d as o3d
+
+
+def plot_local_displacement_deltas(local_displ_deltas):
+    """
+    Plot the local displacement deltas for x, y, and z components over time.
+
+    Parameters:
+    - local_displ_deltas: list of lists or numpy array of shape (n, 3),
+                          where each element contains the displacement [x, y, z] at each step.
+    """
+    # Converti in array numpy per manipolazione
+    local_displ_deltas = np.array(local_displ_deltas)
+    x_values = local_displ_deltas[:, 0]
+    y_values = local_displ_deltas[:, 1]
+    z_values = local_displ_deltas[:, 2]
+
+    # Creiamo un array di indici per il tempo o le misurazioni
+    time_steps = np.arange(len(local_displ_deltas))
+
+    # Plot dei displacements locali per x, y e z
+    plt.figure(figsize=(10, 6))
+    plt.plot(time_steps, x_values, label='Displacement X')
+    plt.plot(time_steps, y_values, label='Displacement Y')
+    plt.plot(time_steps, z_values, label='Displacement Z')
+
+    # Configurazione del grafico
+    plt.title("Local Displacement Deltas (X, Y, Z)")
+    plt.xlabel("Step")
+    plt.ylabel("Displacement")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+
+
+
 def visualize_pc_with_trajectory(pc, trajectory_deltas):
     # Creare una finestra di visualizzazione per la pointcloud e la traiettoria
     point_size = 2
