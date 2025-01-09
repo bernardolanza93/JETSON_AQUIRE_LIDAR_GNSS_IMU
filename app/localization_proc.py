@@ -181,7 +181,7 @@ def resample_data_to_slam_frequency(slam_timestamps, interpolated_data):
     imu_gnss_positions_transformed = []
     for pos in imu_gnss_positions:
         transformed_pos = [
-            -pos[2],
+            pos[2],
             pos[0],
             -pos[1]
         ]
@@ -193,7 +193,7 @@ def resample_data_to_slam_frequency(slam_timestamps, interpolated_data):
     for rot in imu_gnss_rotations:
         transformed_rot = [
             rot[2],
-            -rot[0],
+            rot[0],
             -rot[1]
         ]
         imu_gnss_rotations_transformed.append(transformed_rot)
@@ -257,14 +257,14 @@ def resample_data_to_slam_frequency(slam_timestamps, interpolated_data):
                                resampled_data[slam_timestamps[0]]['rotation']['y'],
                                resampled_data[slam_timestamps[0]]['rotation']['z']])
 
-    # for t in slam_timestamps:
-        # resampled_data[t]['position']['x'] -= first_position[0]
-        # resampled_data[t]['position']['y'] -= first_position[1]
-        # resampled_data[t]['position']['z'] -= first_position[2]
+    for t in slam_timestamps:
+        resampled_data[t]['position']['x'] -= first_position[0]
+        resampled_data[t]['position']['y'] -= first_position[1]
+        resampled_data[t]['position']['z'] -= first_position[2]
         #non devo anullare le rotazioni se no il sistema pensa di muoversi qsempre dritto anche quando non è così. ( es parto da quando sono in curva o da quando torno indietro
-        # resampled_data[t]['rotation']['x'] -= first_rotation[0]
-        # resampled_data[t]['rotation']['y'] -= first_rotation[1]
-        # resampled_data[t]['rotation']['z'] -= first_rotation[2]
+        resampled_data[t]['rotation']['x'] -= first_rotation[0]
+        resampled_data[t]['rotation']['y'] -= first_rotation[1]
+        resampled_data[t]['rotation']['z'] -= first_rotation[2]
 
     return resampled_data
 

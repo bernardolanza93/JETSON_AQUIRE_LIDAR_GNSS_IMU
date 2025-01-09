@@ -348,6 +348,9 @@ def save_imu_kinecct_to_file(bag_file, topic_imu = "/imu/data", output_json="app
     with open(output_json, 'w') as file:
         json.dump(imu_data, file, indent=4)
 
+
+
+
 if __name__ == "__main__":
 
     #main()
@@ -357,7 +360,7 @@ if __name__ == "__main__":
 
     list_topics(bag_file)
 
-    extract_and_save_gnss_data(bag_file)
+    #extract_and_save_gnss_data(bag_file)
     #save_imu_kinecct_to_file(bag_file)
 
 

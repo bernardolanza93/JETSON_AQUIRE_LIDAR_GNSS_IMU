@@ -190,3 +190,38 @@ def extract_and_visualize(playback, output_dir, timestamp_map, frame_map, start_
 
 
 
+def inspect_mkv_file(file):
+    show_image = 0
+    playback = PyK4APlayback(file)
+    playback.open()
+    frame_count = 0
+    while True:
+        try:
+            capture = playback.get_next_capture()
+        except EOFError:
+            break
+
+        if capture is not None:
+            try:
+                print(dir(capture))
+                if show_image:
+                    color_image = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
+
+                    processed_image = resize_and_rotate(color_image, 40)
+                    cv2.imshow("color", processed_image)
+                    # Wait for key press and break the loop if 'q' is pressed
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                    frame_count += 1
+                    print("frame:", frame_count)
+            except Exception as e:
+                print("ERROR! SKIPPED:", e)
+
+    playback.close()
+
+
+
+
+mkv_file = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/slavemkv/20240716_113058_subordinate.mkv"
+inspect_mkv_file(mkv_file)
+

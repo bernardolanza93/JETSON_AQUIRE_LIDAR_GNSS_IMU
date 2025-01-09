@@ -1,26 +1,24 @@
+from external_lis import *
 import custom_slam_doc as CUSTOM_SLAM
-from pyk4a import PyK4APlayback, Config, PyK4A
-from pyk4a import PyK4APlayback, CalibrationType
-import open3d as o3d
-import numpy as np
-import os
+
 import plotter as PLOT
 os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = '/usr/lib/x86_64-linux-gnu/qt5/plugins'
 import matplotlib
 matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
-import pandas as pd
-import cv2
-import matplotlib.pyplot as plt
+
+
 import ctypes
 from scipy.spatial.transform import Rotation as R
 import pyk4a
 import matrix_utilities as MATRIX_UTILS
 import PREPROC_double_KA as KA_PREPROC
-import re
-import sys
+
 from decorator import *
 import localization_proc as LOCALIZE
+from filter_3D_processing import *
+from rendering_functions import *
+from pyk4a import PyK4APlayback, Config, PyK4A
+from pyk4a import PyK4APlayback, CalibrationType
 
 
 #TODO in fusione fai in modo che l area presa in considerazione sia un multiplo
@@ -29,42 +27,11 @@ import localization_proc as LOCALIZE
 # che dovrebbe essere 95 perc source, 0 percentile target o simile sulla x, e 50 per y
 # TIRA GIU anche l accelerometro della kinect
 
-def create_axes(length=1.0):
-    # Asse X - Rosso
-    box_x = o3d.geometry.TriangleMesh.create_box(width=length, height=0.02, depth=0.02)
-    box_x.paint_uniform_color([1, 0, 0])  # Colore rosso per l'asse X
-    box_x.translate([length / 2, 0, 0])  # Centrato sull'origine
+#ACCELEROMETRO KINECT!!!!!
 
-    # Asse Y - Verde
-    box_y = o3d.geometry.TriangleMesh.create_box(width=0.02, height=length, depth=0.02)
-    box_y.paint_uniform_color([0, 1, 0])  # Colore verde per l'asse Y
-    box_y.translate([0, length / 2, 0])  # Centrato sull'origine
 
-    # Asse Z - Blu
-    box_z = o3d.geometry.TriangleMesh.create_box(width=0.02, height=0.02, depth=length)
-    box_z.paint_uniform_color([0, 0, 1])  # Colore blu per l'asse Z
-    box_z.translate([0, 0, length / 2])  # Centrato sull'origine
 
-    return [box_x, box_y, box_z]
-def downsample_point_cloud(point_cloud, voxel_size):
-    """
-    Downsample a point cloud using a voxel grid filter and remove duplicated points.
 
-    Parameters:
-        point_cloud (o3d.geometry.PointCloud): The input point cloud.
-        voxel_size (float): The voxel size for downsampling.
-
-    Returns:
-        o3d.geometry.PointCloud: The downsampled point cloud.
-    """
-
-    # Downsample the point cloud using voxel grid filter
-    downsampled_pc = point_cloud.voxel_down_sample(voxel_size)
-
-    # Remove duplicate points
-    downsampled_pc = downsampled_pc.remove_duplicated_points()
-
-    return downsampled_pc
 
 
 def get_sorted_filenames_by_timestamp(directory):
@@ -78,26 +45,6 @@ def get_sorted_filenames_by_timestamp(directory):
     files_with_timestamps.sort(key=lambda x: x[1])
     sorted_filenames = [x[0] for x in files_with_timestamps]
     return sorted_filenames
-
-def visualize_pc(pc, title):
-    point_size = 2
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(window_name=title)
-
-    # Aggiungi le geometrie una alla volta
-    vis.add_geometry(pc)
-
-    axes = create_axes(length=1.0)
-    for axis in axes:
-        vis.add_geometry(axis)
-
-
-    opt = vis.get_render_option()
-    # Imposta il colore di sfondo (colore RGB normalizzato)
-    opt.background_color = np.array([0.1, 0.1, 0.1])  # Colore nero
-    opt.point_size = point_size
-    vis.run()
-    vis.destroy_window()
 
 
 
@@ -340,10 +287,8 @@ def convert_to_meters(pcd):
     pcd.points = o3d.utility.Vector3dVector(points)
     return pcd
 
-def remove_isolated_points(pcd, nb_neighbors=10, radius=500.0):
-    cl, ind = pcd.remove_radius_outlier(nb_points=nb_neighbors, radius=radius)
-    pcd_cleaned = pcd.select_by_index(ind)
-    return pcd_cleaned
+
+
 
 
 
@@ -437,6 +382,13 @@ def correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_time
 
             # Calcola la traslazione mediata
             delta_translation_icp = updated_trasform_icp_result[:3, 3]
+            thresholds = [0.04, 0.1, 0.04]
+            for i, (value, threshold) in enumerate(zip(delta_translation_icp, thresholds)):
+                if value > threshold:
+                    w_icp = 0.0001
+                    w_gnss = 1 - w_icp
+                    print("CONTROL")
+
             final_translation = w_icp * delta_translation_icp + w_gnss * local_traslation_vector
             global_trj_contribution = rotation_matrix_global @ final_translation
 
@@ -530,13 +482,7 @@ def incremental_plot(downsampled_data):
     plt.show()
 
 
-def filter_points_within_radius(pointcloud, center, radius):
-    points = np.asarray(pointcloud.points)
-    distances = np.linalg.norm(points - center, axis=1)
-    filtered_points = points[distances <= radius]
-    filtered_pointcloud = o3d.geometry.PointCloud()
-    filtered_pointcloud.points = o3d.utility.Vector3dVector(filtered_points)
-    return filtered_pointcloud, len(points) - len(filtered_points)
+
 def flatten_first_level(nested_list):
     result = []
     for sublist in nested_list:
@@ -550,37 +496,46 @@ def flatten_first_level(nested_list):
     return result
 
 @timeit
-def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, VOXEL_VOLUME,w_icp=0.001, w_gnss=0.999):
-    # devo saltare la zero che è solo target
-    # prendo la sua trasformata trovata tra le sotto pc e la applico alla coppia dopo
-    # current_source.trasform(last_epoch_trasformation[i-1])
-    # NDR la trasformazione [i-esima] l ho gia usata l epoca prima per traslare la PC
-    # tecnicamente cosi ho PC 0,1,2,3  0-1 2-3 gia fuse, applicando questa nuova tresformazione in pratica sto sovrapponendo pc2 a pc1 cosi avremo in serie 0 1+2 e 3
-    # la trasformazione nuova mi farà avanzare 2-3 alla fine di 1,
-    # ogni iterazione individui la trasformazione 1-2 che però potrebbe crescere con le iterazioni (dipende na quante epoche hanno costruito 1)
-    # se volessi avvicinarle ancora dovrei sommare la trasformazione 2-3 anche, (da rivedere perche potrebbe essere troppo)
-    # fuse PC[0],PC[1]
-    # fuse PC[i],PC[i+1]
-    # trasformation_estimated = icp
-    # trasfoirmation_current.append(trasformation_estimated)
-    # source-trasform to match target ->(trasformation_estimated)
-    # fuse target and source transformed
-    # new_matrices.append(fusion)
+def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, VOXEL_VOLUME,w_icp=0.3):
+
+    """
+    Procedura per la fusione gerarchica delle nuvole di punti:
+
+    1. La nuvola di punti al primo indice (indice 0) è considerata come il target iniziale e non viene trasformata in questa iterazione.
+
+    2. Ogni nuvola di punti successiva viene trasformata utilizzando la trasformazione stimata tra coppie di nuvole di punti nella precedente iterazione.
+
+    3. Per ciascuna coppia di nuvole di punti:
+        a. La trasformazione della precedente iterazione viene applicata alla nuvola corrente (source).
+        b. Si esegue l'ICP tra la nuvola trasformata (source) e il target corrente.
+        c. La trasformazione stimata tramite ICP viene aggiunta alla trasformazione accumulata.
+
+    4. Dopo ogni fusione, la nuvola di punti risultante diventa il nuovo target.
+
+    5. La struttura gerarchica consente di combinare nuvole di punti in modo incrementale:
+        - Prima fusione: PC[0] + PC[1].
+        - Successive fusioni: il risultato di (PC[0] + PC[1]) viene fuso con PC[2], e così via.
+
+    6. Le trasformazioni tra le nuvole di punti possono aumentare in complessità man mano che si procede, poiché ogni trasformazione è composta da quelle delle iterazioni precedenti.
+
+    7. Al termine di ciascuna iterazione:
+        - La nuova trasformazione stimata viene salvata.
+        - La nuvola di punti risultante viene aggiunta alla lista delle fusioni completate.
+
+    """
 
     #incremental_plot(downsampled_data)
+
+    w_gnss = 1 - w_icp
 
     # al primo giro prendo PC grezze
     epoch_start_pointclouds = input_all_pointcloud
     epoch = 0
+    #parto da prior nulle in quanto tutte le pooiintcloud sono una affianco all altra
     last_epoch_trasformation = [np.eye(4) for _ in range(len(input_all_pointcloud))]
-    x_y = []
-    timestamp_dict = {}
-    bernardo_timestamp_dictionary = {}
     bernardo_timestamp_list = []
-
-    max_filtered_pointcloud_size = 0
     total_filtered_points = 0
-
+    max_filtered_pointcloud_size = 0
     trajectory_deltas = {}
     local_displ_deltas = []
 
@@ -589,8 +544,8 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
         epoch += 1
         i = 1
 
-        new_halfed_pointcloud = []
 
+        new_halfed_pointcloud = []
         trasformation_current = []
         # Dizionario per i timestamp delle nuove pointcloud fuse
 
@@ -598,7 +553,9 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
         bernardo_empty_list_timestamp = []
 
         while i < len(epoch_start_pointclouds):
+            #print(round(100 * (i / len(epoch_start_pointclouds)), 1), "% ", end="")
             if len(epoch_start_pointclouds) == 2:
+                #rimangono le ultime 2 mega pointcloud
                 print("LAST EPOCH")
                 print(len(last_epoch_trasformation))
                 print(len(epoch_start_pointclouds))
@@ -606,6 +563,8 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
             if i > 0:
                 initial_trasform_from_last_epoch_1_couple = (last_epoch_trasformation[i - 1])
                 initial_trasform_from_last_epoch_2_couple = (last_epoch_trasformation[i])
+                #queste hanno portato all ultima prior -  vengono dall epoca precedente
+                # (sono le prior dell epoca precedente) quindi insieme fanno la prior di quest epoca
 
                 prior_trasformation_composed = np.dot(initial_trasform_from_last_epoch_1_couple, initial_trasform_from_last_epoch_2_couple)
                 source_raw = epoch_start_pointclouds[i]
@@ -613,6 +572,9 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                 current_source = o3d.geometry.PointCloud(source_raw)
                 current_source.transform(initial_trasform_from_last_epoch_1_couple)
                 target = epoch_start_pointclouds[i - 1]
+
+
+                # parte per registrare le traslazioni locali ordinate (non hierarchiche)
 
                 if epoch == 1:
                     bernardo_timestamp_list.append([timestamp_sorted[i-1],timestamp_sorted[i]])
@@ -625,44 +587,52 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
 
 
 
-                if epoch < 3:
+                # DOWNSAMPLING PROGRESSIVO
 
-                    if len(current_source.points) > 15000:
-                        current_source = downsample_point_cloud(current_source, VOXEL_VOLUME)
-                    if len(target.points) > 15000:
-                        target = downsample_point_cloud(target, VOXEL_VOLUME)
+                DS_const =  0.05
 
-                    filtered_source = current_source
-                    filtered_target = target
+                if len(current_source.points) > 20000:
+                    filtered_source = downsample_point_cloud(current_source, DS_const/(epoch*2))
                 else:
+                    filtered_source = current_source
+                if len(target.points) > 20000:
+                    filtered_target = downsample_point_cloud(target, DS_const/epoch*2)
+                else:
+                    filtered_target = target
 
-                    current_source = downsample_point_cloud(current_source, VOXEL_VOLUME)
-                    target = downsample_point_cloud(target, VOXEL_VOLUME)
 
-                    source_bounds = np.asarray(current_source.get_max_bound()) - np.asarray(
-                        current_source.get_min_bound())
-                    target_bounds = np.asarray(target.get_max_bound()) - np.asarray(target.get_min_bound())
+
+                #si attiva quando le pointcloud diventano grandi (E POCHE!)
+                if epoch > 4:
+                #if 0:
+                    #SEGMENTATORE DELL AREA DI INTERESSE - TOGLIE PARTI DI PC NON UTILI ALLA FUSIONE SOLODNURANTE LA FUSIONE
+
+                    source_bounds = np.asarray(filtered_source.get_max_bound()) - np.asarray(
+                        filtered_source.get_min_bound())
+                    target_bounds = np.asarray(filtered_target.get_max_bound()) - np.asarray(filtered_target.get_min_bound())
                     max_source_bound = np.max(source_bounds)
                     max_target_bound = np.max(target_bounds)
                     # print(f"MaxDIM: {round(np.max([max_source_bound, max_target_bound]), 2)} m")
 
+
+
                     if np.any(source_bounds > 8) or np.any(target_bounds > 8):
 
-                        source_centroid = np.mean(np.asarray(current_source.points), axis=0)
-                        target_centroid = np.mean(np.asarray(target.points), axis=0)
+                        source_centroid = np.mean(np.asarray(filtered_source.points), axis=0)
+                        target_centroid = np.mean(np.asarray(filtered_target.points), axis=0)
                         central_point = (source_centroid + target_centroid) / 2
 
                         radius = 4.0
-                        filtered_source, filtered_points_source = filter_points_within_radius(current_source,
+                        filtered_source_TENT, filtered_points_source = filter_points_within_radius(filtered_source,
                                                                                               central_point, radius)
-                        source_bounds_filtered = np.asarray(filtered_source.get_max_bound()) - np.asarray(
-                            filtered_source.get_min_bound())
+                        source_bounds_filtered = np.asarray(filtered_source_TENT.get_max_bound()) - np.asarray(
+                            filtered_source_TENT.get_min_bound())
                         max_source_filtered_bound = np.max(source_bounds_filtered)
 
-                        filtered_target, filtered_points_target = filter_points_within_radius(target, central_point,
+                        filtered_target_TENT, filtered_points_target = filter_points_within_radius(filtered_target, central_point,
                                                                                               radius)
-                        target_bounds_filtered = np.asarray(filtered_target.get_max_bound()) - np.asarray(
-                            filtered_target.get_min_bound())
+                        target_bounds_filtered = np.asarray(filtered_target_TENT.get_max_bound()) - np.asarray(
+                            filtered_target_TENT.get_min_bound())
                         max_target_filtered_bound = np.max(target_bounds_filtered)
                         print(
                             f"TENDAGGIO SOURCE from {round(max_source_bound, 2)} to {round(max_source_filtered_bound, 2)} m (-{filtered_points_source} points)")
@@ -670,27 +640,35 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                             f"TENDAGGIO TARGET from {round(max_target_bound, 2)} to {round(max_target_filtered_bound, 2)} m (-{filtered_points_target} points)")
 
                         total_filtered_points += filtered_points_source + filtered_points_target
-                        max_filtered_pointcloud_size = max(max_filtered_pointcloud_size, len(filtered_source.points),
-                                                           len(filtered_target.points))
+                        max_filtered_pointcloud_size = max(max_filtered_pointcloud_size, len(filtered_source_TENT.points),
+                                                           len(filtered_target_TENT.points))
                     else:
-                        filtered_source = current_source
-                        filtered_target = target
+                        filtered_source_TENT = filtered_source
+                        filtered_target_TENT = filtered_target
+
+                else:
+                    filtered_source_TENT = filtered_source
+                    filtered_target_TENT = filtered_target
 
 
 
 
                 #if 1:
-                if len(filtered_source.points) < 200 or len(filtered_target.points) < 200:
-                    updated_trasform_icp_result, global_trnslation, local_translation = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
-                                                                            current_timestamp,
-                                                                            0, w_icp,
-                                                                            w_gnss, True)
+                #ALTRA CONDIZIONE POSSIBILE - ESTENSIONE pc OPPURE ROTAZIONE - OPPURE VELOCITÀ VARIE...
+                #SOLO GNSS
+                if len(filtered_source.points) < 100 or len(filtered_target.points) < 100:
+                    print("LOW POINTS! GNSS SOLO: ",len(filtered_source.points),len(filtered_target.points))
+                    updated_trasform_icp_result, global_trnslation, local_translation = correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_timestamp, 0, w_icp, w_gnss, True)
+
+
                 else:
-                    updated_trasform_icp_result_raw = CUSTOM_SLAM.icp_open3d(filtered_source, filtered_target, 0.05, 200)
+                    updated_trasform_icp_result_raw = CUSTOM_SLAM.icp_open3d(filtered_source_TENT, filtered_target_TENT, 0.05, 200)
+
                     updated_trasform_icp_result, global_trnslation, local_translation = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
                                                                             current_timestamp,
                                                                             updated_trasform_icp_result_raw, w_icp,
                                                                             w_gnss)
+
                 local_displ_deltas.append(local_translation)
                 if previous_timestamp is not None:
                     # Estrarre la trasformazione corrispondente dalla traiettoria GNSS e IMU
@@ -736,20 +714,37 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                 }
                 total_trasformation_prior_plus_icp = np.dot(prior_trasformation_composed, updated_trasform_icp_result)
 
-                trasformed_icp_source = o3d.geometry.PointCloud(current_source)
+                trasformed_icp_source = o3d.geometry.PointCloud(filtered_source)
                 trasformed_icp_source.transform(updated_trasform_icp_result)
 
-                merged_pcd = target + trasformed_icp_source
+                merged_pcd = filtered_target + trasformed_icp_source
+                merged_pcd = remove_redundant_points(merged_pcd, min_distance=0.003)
                 merged_pcd = remove_isolated_points(merged_pcd, nb_neighbors=12, radius=0.4)
+
+
+                if epoch == 1:
+                    #TRASLAZIONE INIZIALE DISTANZA SENSORI
+                    fixed_gnss_kinect_translation = np.array([0, 0, 0.334])
+                    # Ottieni le coordinate dei punti come un array numpy
+                    points = np.asarray(merged_pcd.points)
+
+                    # Applica la traslazione
+                    points_translated = points + fixed_gnss_kinect_translation
+
+                    # Aggiorna i punti nell'oggetto PointCloud
+                    merged_pcd.points = o3d.utility.Vector3dVector(points_translated)
+
+
                 trasformation_current.append(total_trasformation_prior_plus_icp)
                 new_halfed_pointcloud.append(merged_pcd)
 
                 if i == len(epoch_start_pointclouds) - 2 and len(epoch_start_pointclouds) % 2 != 0:
                     print("DISPARI")
-                    print(f"START Epoch {epoch},i = {i}, PCs AVIABLE:{len(epoch_start_pointclouds)} PCS comp:{len(new_halfed_pointcloud)} trasform:{len(trasformation_current)}")
-                    print("add last PC with its trasformation")
+                    # print(f"START Epoch {epoch},i = {i}, PCs AVIABLE:{len(epoch_start_pointclouds)} PCS comp:{len(new_halfed_pointcloud)} trasform:{len(trasformation_current)}")
+                    # print("add last PC with its trasformation")
                     last_pc = epoch_start_pointclouds[i + 1]
                     if epoch == 1:
+                        print("FIRST")
                         bernardo_timestamp_list.append([timestamp_sorted[i+1]])
                     else:
                         bernardo_empty_list_timestamp.append(bernardo_timestamp_list[i+1])
@@ -763,14 +758,13 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
 
             i += 2
 
-        print("LEN pc and ts : ", len(new_halfed_pointcloud), len(bernardo_empty_list_timestamp))
+        #print("LEN pc and ts : ", len(new_halfed_pointcloud), len(bernardo_empty_list_timestamp))
 
         epoch_start_pointclouds = new_halfed_pointcloud
         last_epoch_trasformation = trasformation_current
 
         if epoch > 1:
             bernardo_timestamp_list = flatten_first_level(bernardo_empty_list_timestamp)
-        print("LEN SINGLE TS ELEMENT : ", len(bernardo_timestamp_list[0]))
         end_time = time.time()
         elapsed_time = end_time - start_time
         elapsed_time_ms = round(elapsed_time, 3)
@@ -913,13 +907,13 @@ if 1:
         pointcloud_files_sorted = []
 
     print("total PCs", len(pointcloud_files))
-    starts = 1000
-    ends = 2800
+    starts = 1500
+    ends = 2900
     # starts = 500
-    # ends = 1000
+    # ends = 753
     # starts = 2500
-    # ends = 3000
-    voxel = 0.1
+    # ends = 3q000
+    voxel = 0.2
 
     print("analizing: S:", starts, " E:", ends, " TOT:", ends-starts)
     timestamp_sorted = []
@@ -942,7 +936,6 @@ if 1:
     #downsampled_gnss_imu = LOCALIZE.downsample_interpolated_data_to_slam(timestamp_sorted,interpolated_data)
     #IMU NON APPLICATO - FRQUENZA NATURALE GNSS < SLAM
     downsampled_gnss_imu = LOCALIZE.resample_data_to_slam_frequency(timestamp_sorted,interpolated_data)
-    PLOT.plot_GNSS_slamFPS_trajectories(downsampled_gnss_imu)
 
     if 0:
         PLOT.plot_GNSS_slamFPS_trajectories(downsampled_gnss_imu)
