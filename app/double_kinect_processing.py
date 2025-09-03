@@ -1,6 +1,8 @@
+import sys
+
 from external_lis import *
 import custom_slam_doc as CUSTOM_SLAM
-
+from datetime import datetime
 import plotter as PLOT
 os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = '/usr/lib/x86_64-linux-gnu/qt5/plugins'
 import matplotlib
@@ -21,9 +23,7 @@ from pyk4a import PyK4APlayback, Config, PyK4A
 from pyk4a import PyK4APlayback, CalibrationType
 
 
-#TODO in fusione fai in modo che l area presa in considerazione sia un multiplo
-# dell area comune che non sai qual e, ma tieni conto che sia circa 3 metri,
-# quinid prendi solo l area - 3 metri fdal centro di fusione,
+
 # che dovrebbe essere 95 perc source, 0 percentile target o simile sulla x, e 50 per y
 # TIRA GIU anche l accelerometro della kinect
 
@@ -343,7 +343,16 @@ def correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_time
 
         final_translation = np.array(local_traslation_vector)
 
+
         if no_pc:
+
+
+            # # Converti la rotazione GNSS/IMU in quaternione
+            # gnss_rotation = R.from_euler('xyz', [delta_rotation['x'], delta_rotation['y'], delta_rotation['z']], degrees=False)
+            # gnss_quaternion = gnss_rotation.as_quat()
+            # combined_rotation_matrix = R.from_quat(gnss_quaternion).as_matrix()
+            # final_translation = local_traslation_vector
+            # global_trj_contribution = rotation_matrix_global @ final_translation
 
             # Step 3: Crea la matrice di rotazione incrementale usando i delta angoli tra L1 e L2
             rot_x_incremental = R.from_euler('x', delta_rotation['x'], degrees=False).as_matrix()
@@ -358,6 +367,7 @@ def correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_time
             T_L1_L2[:3, :3] = combined_rotation_matrix
             T_L1_L2[:3, 3] = final_translation
             global_trj_contribution = global_combined_translation
+
 
 
 
@@ -387,8 +397,7 @@ def correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_time
                 if value > threshold:
                     w_icp = 0.0001
                     w_gnss = 1 - w_icp
-                    print("CONTROL")
-
+            print("HYBRID-TRASFORM GNSS ICP")
             final_translation = w_icp * delta_translation_icp + w_gnss * local_traslation_vector
             global_trj_contribution = rotation_matrix_global @ final_translation
 
@@ -495,8 +504,66 @@ def flatten_first_level(nested_list):
         result.append(flattened_sublist)
     return result
 
+
+def filter_pointclouds_by_central_radius(source_pc, target_pc, radius=4.0, bound_threshold=5.0, verbose=True):
+    """
+    Riduce l'area delle point cloud filtrando i punti al di fuori di un raggio da un punto centrale.
+
+    Parametri:
+        source_pc (o3d.geometry.PointCloud): point cloud sorgente
+        target_pc (o3d.geometry.PointCloud): point cloud target
+        radius (float): raggio per il filtraggio
+        bound_threshold (float): soglia dimensionale oltre la quale viene applicato il filtraggio
+        verbose (bool): se True, stampa log informativi
+
+    Ritorna:
+        filtered_source (o3d.geometry.PointCloud)
+        filtered_target (o3d.geometry.PointCloud)
+        num_points_removed_source (int)
+        num_points_removed_target (int)
+        max_bound_filtered (float): massimo ingombro finale delle due PC filtrate
+    """
+    source_bounds = np.asarray(source_pc.get_max_bound()) - np.asarray(source_pc.get_min_bound())
+    target_bounds = np.asarray(target_pc.get_max_bound()) - np.asarray(target_pc.get_min_bound())
+    max_source_bound = np.max(source_bounds)
+    max_target_bound = np.max(target_bounds)
+
+    if verbose:
+        print(f"MaxDIM: {round(max(max_source_bound, max_target_bound), 2)} m")
+
+    if np.any(source_bounds > bound_threshold) or np.any(target_bounds > bound_threshold):
+        # Centro tra i due centroidi
+        source_centroid = np.mean(np.asarray(source_pc.points), axis=0)
+        target_centroid = np.mean(np.asarray(target_pc.points), axis=0)
+        central_point = (source_centroid + target_centroid) / 2
+
+        # Filtra
+        filtered_source, removed_source = filter_points_within_radius(source_pc, central_point, radius)
+        filtered_target, removed_target = filter_points_within_radius(target_pc, central_point, radius)
+
+        # Bounds post-filtraggio
+        source_bounds_filtered = np.asarray(filtered_source.get_max_bound()) - np.asarray(filtered_source.get_min_bound())
+        target_bounds_filtered = np.asarray(filtered_target.get_max_bound()) - np.asarray(filtered_target.get_min_bound())
+        max_bound_filtered = max(np.max(source_bounds_filtered), np.max(target_bounds_filtered))
+
+        if verbose:
+            total_source = len(source_pc.points)
+            total_target = len(target_pc.points)
+            valid_source = len(filtered_source.points)
+            valid_target = len(filtered_target.points)
+
+            print(f"TENDAGGIO SOURCE from {round(max_source_bound, 2)} to {round(np.max(source_bounds_filtered), 2)} m "
+                  f"(-{removed_source} points) → punti validi: {valid_source}/{total_source}")
+            print(f"TENDAGGIO TARGET from {round(max_target_bound, 2)} to {round(np.max(target_bounds_filtered), 2)} m "
+                  f"(-{removed_target} points) → punti validi: {valid_target}/{total_target}")
+
+        return filtered_source, filtered_target, removed_source, removed_target, max_bound_filtered
+
+    # Se bounds sono già piccoli, non serve tendaggio
+    return source_pc, target_pc, 0, 0, max(max_source_bound, max_target_bound)
+
 @timeit
-def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, VOXEL_VOLUME,w_icp=0.3):
+def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted, downsampled_data, DS_const,w_icp=0):
 
     """
     Procedura per la fusione gerarchica delle nuvole di punti:
@@ -538,6 +605,7 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
     max_filtered_pointcloud_size = 0
     trajectory_deltas = {}
     local_displ_deltas = []
+    GNSS_SOLO = 0
 
     while len(epoch_start_pointclouds) > 1:
         start_time = time.time()
@@ -580,6 +648,7 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                     bernardo_timestamp_list.append([timestamp_sorted[i-1],timestamp_sorted[i]])
                     current_timestamp = timestamp_sorted[i]
                     previous_timestamp = timestamp_sorted[i - 1]
+                    #print("PUNTI 1", len(current_source.points))
                 else:
                     bernardo_empty_list_timestamp.append([bernardo_timestamp_list[i-1],bernardo_timestamp_list[i]])
                     current_timestamp = min(bernardo_timestamp_list[i])
@@ -589,79 +658,50 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
 
                 # DOWNSAMPLING PROGRESSIVO
 
-                DS_const =  0.05
 
-                if len(current_source.points) > 20000:
-                    filtered_source = downsample_point_cloud(current_source, DS_const/(epoch*2))
+                threshold_voxel = 20000
+                if w_icp == 0.0:
+                    threshold_voxel = 8000
+                    DS_const = 0.2
+
+                sizer_voxel = DS_const/(epoch*2)
+
+
+                if len(current_source.points) > threshold_voxel:
+                    filtered_source = downsample_point_cloud(current_source, sizer_voxel)
                 else:
                     filtered_source = current_source
-                if len(target.points) > 20000:
-                    filtered_target = downsample_point_cloud(target, DS_const/epoch*2)
+                if len(target.points) > threshold_voxel:
+                    filtered_target = downsample_point_cloud(target, sizer_voxel)
                 else:
                     filtered_target = target
 
 
 
-                #si attiva quando le pointcloud diventano grandi (E POCHE!)
-                if epoch > 4:
-                #if 0:
-                    #SEGMENTATORE DELL AREA DI INTERESSE - TOGLIE PARTI DI PC NON UTILI ALLA FUSIONE SOLODNURANTE LA FUSIONE
-
-                    source_bounds = np.asarray(filtered_source.get_max_bound()) - np.asarray(
-                        filtered_source.get_min_bound())
-                    target_bounds = np.asarray(filtered_target.get_max_bound()) - np.asarray(filtered_target.get_min_bound())
-                    max_source_bound = np.max(source_bounds)
-                    max_target_bound = np.max(target_bounds)
-                    # print(f"MaxDIM: {round(np.max([max_source_bound, max_target_bound]), 2)} m")
-
-
-
-                    if np.any(source_bounds > 8) or np.any(target_bounds > 8):
-
-                        source_centroid = np.mean(np.asarray(filtered_source.points), axis=0)
-                        target_centroid = np.mean(np.asarray(filtered_target.points), axis=0)
-                        central_point = (source_centroid + target_centroid) / 2
-
-                        radius = 4.0
-                        filtered_source_TENT, filtered_points_source = filter_points_within_radius(filtered_source,
-                                                                                              central_point, radius)
-                        source_bounds_filtered = np.asarray(filtered_source_TENT.get_max_bound()) - np.asarray(
-                            filtered_source_TENT.get_min_bound())
-                        max_source_filtered_bound = np.max(source_bounds_filtered)
-
-                        filtered_target_TENT, filtered_points_target = filter_points_within_radius(filtered_target, central_point,
-                                                                                              radius)
-                        target_bounds_filtered = np.asarray(filtered_target_TENT.get_max_bound()) - np.asarray(
-                            filtered_target_TENT.get_min_bound())
-                        max_target_filtered_bound = np.max(target_bounds_filtered)
-                        print(
-                            f"TENDAGGIO SOURCE from {round(max_source_bound, 2)} to {round(max_source_filtered_bound, 2)} m (-{filtered_points_source} points)")
-                        print(
-                            f"TENDAGGIO TARGET from {round(max_target_bound, 2)} to {round(max_target_filtered_bound, 2)} m (-{filtered_points_target} points)")
-
-                        total_filtered_points += filtered_points_source + filtered_points_target
-                        max_filtered_pointcloud_size = max(max_filtered_pointcloud_size, len(filtered_source_TENT.points),
-                                                           len(filtered_target_TENT.points))
-                    else:
-                        filtered_source_TENT = filtered_source
-                        filtered_target_TENT = filtered_target
+                #ACTION: TENDAGGIO
+                if epoch > 5:
+                    filtered_source_TENT, filtered_target_TENT, removed_source, removed_target, max_dim = filter_pointclouds_by_central_radius(filtered_source, filtered_target, radius=3.0)
+                    total_filtered_points += removed_source + removed_target
+                    max_filtered_pointcloud_size = max(max_filtered_pointcloud_size,
+                                                       len(filtered_source_TENT.points),
+                                                       len(filtered_target_TENT.points))
 
                 else:
                     filtered_source_TENT = filtered_source
                     filtered_target_TENT = filtered_target
+                #END: TENDAGGIO
 
 
 
-
-                #if 1:
-                #ALTRA CONDIZIONE POSSIBILE - ESTENSIONE pc OPPURE ROTAZIONE - OPPURE VELOCITÀ VARIE...
-                #SOLO GNSS
-                if len(filtered_source.points) < 100 or len(filtered_target.points) < 100:
-                    print("LOW POINTS! GNSS SOLO: ",len(filtered_source.points),len(filtered_target.points))
+                #ACTION: HYBRID TRANSFORMER
+                if len(filtered_source.points) < 500 or len(filtered_target.points) < 500 or w_icp == 0.0:
+                    GNSS_SOLO = 1
+                    print("|_| GNSS SOLO: ",len(filtered_source.points),len(filtered_target.points))
                     updated_trasform_icp_result, global_trnslation, local_translation = correct_slam_with_gnssimu(previous_timestamp, downsampled_data, current_timestamp, 0, w_icp, w_gnss, True)
 
 
                 else:
+                    GNSS_SOLO = 0
                     updated_trasform_icp_result_raw = CUSTOM_SLAM.icp_open3d(filtered_source_TENT, filtered_target_TENT, 0.05, 200)
 
                     updated_trasform_icp_result, global_trnslation, local_translation = correct_slam_with_gnssimu(previous_timestamp, downsampled_data,
@@ -670,6 +710,10 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                                                                             w_gnss)
 
                 local_displ_deltas.append(local_translation)
+                # END: HYBRID TRANSFORMER
+
+
+                # ACTION GNSS TRAJECTORY
                 if previous_timestamp is not None:
                     # Estrarre la trasformazione corrispondente dalla traiettoria GNSS e IMU
                     current_trajectory = downsampled_data.get(current_timestamp)
@@ -691,7 +735,9 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                     delta_position = {'x': 0, 'y': 0, 'z': 0}
                     delta_rotation = {'x': 0, 'y': 0, 'z': 0}
 
+                # END GNSS TRAJECTORY
 
+                #ACTION SAVE ALL TRJ
                 # Creare un dizionario per la fusione corrente con la trasformazione stimata dallo SLAM ICP e il delta GNSS/IMU
                 trajectory_deltas[current_timestamp] = {
                     'slam_icp_transformation': {
@@ -712,19 +758,28 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                         'delta_rotation_z': delta_rotation['z']
                     }
                 }
+
+                # END SAVE ALL TRJ
                 total_trasformation_prior_plus_icp = np.dot(prior_trasformation_composed, updated_trasform_icp_result)
 
                 trasformed_icp_source = o3d.geometry.PointCloud(filtered_source)
                 trasformed_icp_source.transform(updated_trasform_icp_result)
 
                 merged_pcd = filtered_target + trasformed_icp_source
-                merged_pcd = remove_redundant_points(merged_pcd, min_distance=0.003)
-                merged_pcd = remove_isolated_points(merged_pcd, nb_neighbors=12, radius=0.4)
+                #si attiva se ci sono abbastanza punti o se forzo il gnss a trasformare
+                if len(merged_pcd.points) > 5000:
+                    #no solo gnss - no icp soppresso hardcoded - hibrid si - pesato si
+                    if not GNSS_SOLO or w_icp != 0.0:
+                        merged_pcd = remove_redundant_points(merged_pcd, min_distance=0.005)
+                    merged_pcd = remove_isolated_points(merged_pcd, nb_neighbors=12, radius=0.4)
 
-
+                #ACTION CORREZIONE POSIZIONE ANTENNA GNSS KINECT
                 if epoch == 1:
                     #TRASLAZIONE INIZIALE DISTANZA SENSORI
-                    fixed_gnss_kinect_translation = np.array([0, 0, 0.334])
+                    #fixed_gnss_kinect_translation = np.array([0, 0, 0.334])
+
+                    #ARTIFICIALE:
+                    fixed_gnss_kinect_translation = np.array([0, 0, 0.634])
                     # Ottieni le coordinate dei punti come un array numpy
                     points = np.asarray(merged_pcd.points)
 
@@ -738,19 +793,21 @@ def hierarchy_slam_icp(input_all_pointcloud, timestamp_sorted,downsampled_data, 
                 trasformation_current.append(total_trasformation_prior_plus_icp)
                 new_halfed_pointcloud.append(merged_pcd)
 
+                # ACTION GESTION POINTCLOUD DISACCOPIATE DISPARI
                 if i == len(epoch_start_pointclouds) - 2 and len(epoch_start_pointclouds) % 2 != 0:
                     print("DISPARI")
-                    # print(f"START Epoch {epoch},i = {i}, PCs AVIABLE:{len(epoch_start_pointclouds)} PCS comp:{len(new_halfed_pointcloud)} trasform:{len(trasformation_current)}")
-                    # print("add last PC with its trasformation")
                     last_pc = epoch_start_pointclouds[i + 1]
+
                     if epoch == 1:
-                        print("FIRST")
-                        bernardo_timestamp_list.append([timestamp_sorted[i+1]])
+                        print("APPLICO TRASLAZIONE ALLA DISPARI")
+                        last_points = np.asarray(last_pc.points)
+                        last_points_translated = last_points + np.array([0, 0, 0.634])
+                        last_pc.points = o3d.utility.Vector3dVector(last_points_translated)
+                        bernardo_timestamp_list.append([timestamp_sorted[i + 1]])
                     else:
-                        bernardo_empty_list_timestamp.append(bernardo_timestamp_list[i+1])
+                        bernardo_empty_list_timestamp.append(bernardo_timestamp_list[i + 1])
 
-
-                    last_trasaform = (last_epoch_trasformation[i + 1])
+                    last_trasaform = last_epoch_trasformation[i + 1]
                     trasformation_current.append(last_trasaform)
                     new_halfed_pointcloud.append(last_pc)
 
@@ -784,6 +841,80 @@ def get_timestamp(file_name):
 
     return float(timestamp_str)
 
+def icp_rgb_standard(input_all_pointcloud,timestamp_sorted):
+
+
+
+    # Parametri configurabili
+    voxel_size = 0.02
+    max_corr_dist = 0.15  # puoi aumentare leggermente rispetto a ICP puro
+
+    # Inizializza il punto di partenza
+    # Primo frame
+    pcd_prev = input_all_pointcloud[0].voxel_down_sample(voxel_size)
+    pcd_prev.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+    accumulated_pcd = pcd_prev
+
+    transformations = [np.eye(4)]
+    current_pose = np.eye(4)
+
+    # Calcola le normali (necessarie per Colored ICP)
+    pcd_prev.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+    save_debug_frames = True  # o False se non vuoi salvare su disco
+
+    for i in range(1, len(input_all_pointcloud)):
+        print(f"[DEBUG] Frame {i}")
+
+        source = input_all_pointcloud[i].to_legacy().voxel_down_sample(voxel_size)
+        source.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+
+        print(" - Source points:", np.asarray(source.points).shape)
+        print(" - Target points:", np.asarray(pcd_prev.points).shape)
+        print(" - Source has color:", len(source.colors) > 0)
+        print(" - Target has color:", len(pcd_prev.colors) > 0)
+        print(" - Source normals:", source.has_normals())
+        print(" - Target normals:", pcd_prev.has_normals())
+
+        # === Try Colored ICP ===
+        try:
+            result = o3d.pipelines.registration.registration_colored_icp(
+                source, pcd_prev,
+                max_corr_dist,
+                np.eye(4),
+                o3d.pipelines.registration.TransformationEstimationForColoredICP()
+            )
+            print(f"✅ Colored ICP successful at frame {i}")
+        except RuntimeError as e:
+            print(f"❌ Colored ICP failed at frame {i}: {str(e)}")
+
+            # Optional fallback to PointToPlane ICP
+            try:
+                result = o3d.pipelines.registration.registration_icp(
+                    source, pcd_prev,
+                    max_corr_dist,
+                    np.eye(4),
+                    o3d.pipelines.registration.TransformationEstimationPointToPlane()
+                )
+                print(f"✅ PointToPlane ICP fallback succeeded at frame {i}")
+            except RuntimeError as e2:
+                print(f"❌ Fallback ICP also failed at frame {i}: {str(e2)}")
+                if save_debug_frames:
+                    os.makedirs("debug_icp", exist_ok=True)
+                    o3d.io.write_point_cloud(f"debug_icp/source_{i:03d}.ply", source)
+                    o3d.io.write_point_cloud(f"debug_icp/target_{i:03d}.ply", pcd_prev)
+                continue  # salta il frame ma prosegui
+
+        T = result.transformation
+        current_pose = current_pose @ T
+        transformations.append(current_pose.copy())
+
+        aligned = source.transform(current_pose)
+        accumulated_pcd += aligned
+        pcd_prev = source
+
+    # Visualizzazione o salvataggio
+    o3d.visualization.draw_geometries([accumulated_pcd])
+    o3d.io.write_point_cloud("ricostruzione_colored.ply", accumulated_pcd)
 
 
 if 1:
@@ -824,21 +955,17 @@ if 1:
         #CON ROTAZIONI IMU
         #interpolated_data = LOCALIZE.interpolate_imu_gnss(timestamps_imu,rotations,interpolated_gnss_data)
         #ROTAZIONI GENENREATE  DA TRAIETTORIA
-        interpolated_data = LOCALIZE.generate_gnss_based_orientation(interpolated_gnss_data)
-
+        #interpolated_data = LOCALIZE.generate_gnss_based_orientation(interpolated_gnss_data)
+        interpolated_data = LOCALIZE.generate_gnss_based_orientation_with_imu(interpolated_gnss_data, timestamps_imu, rotations, 5,5, True)
 
         # Plot the translations
-
-
         # Plot the linear accelerationsa
         # LOCALIZE.plot_accelerations(timestamps, linear_accelerations)
         # LOCALIZE.plot_accelerations(timestamps, global_accelerations)
         # LOCALIZE.plot_accelerations_and_rotations(timestamps, linear_accelerations, rotations)
         # LOCALIZE.plot_accelerations_and_rotations(timestamps, global_accelerations,rotations)
-
         # # Plot the rotations
-        # LOCALIZE.plot_rotations(timestamps, rotations)
-
+        #LOCALIZE.plot_rotations(timestamps_imu, rotations)
         # Plot the 3D trajectory
         #LOCALIZE.plot_trajectory_3d_imuu(timestamps_imu, trajectory_imu, rotations)
 
@@ -873,6 +1000,7 @@ if 1:
         #__________________________COUPLING________________________#
         height_displacement = 853 #[mm]
         lateral_displacement = 6
+        #BETWEEN KINECT AZURE CAMERAS (ONE RELATIVE TO THE OTHER)
 
         initial_trasform_fixed_high_camera = np.eye(4)
 
@@ -881,6 +1009,8 @@ if 1:
         initial_trasform_fixed_high_camera[2, 3] = 6    # Traslazione su z
 
         transform_all_lower_pc_plus_icp_registration(output_folder_pc_1, output_folder_pc_2, initial_trasform_fixed_high_camera,coupled_saving_folder)
+        #THE lower pc from the bottom camera is firstly rigid transformed to the top one,
+        # then is also fused via ICP to correct vibration related misaligment
         # take this list of pointclpouds and save with: pointcloud_<timestamp> in a given folder
         # save here : coupled_saving_folder
 
@@ -907,13 +1037,27 @@ if 1:
         pointcloud_files_sorted = []
 
     print("total PCs", len(pointcloud_files))
-    starts = 1500
-    ends = 2900
+    # starts = 2700
+    # ends = 3400
+
+
     # starts = 500
     # ends = 753
-    # starts = 2500
-    # ends = 3q000
-    voxel = 0.2
+    #cambio filare (curva del mezzo)
+    # starts = 1800
+    # ends = 2600
+    #LATO A SFERE
+    starts = 1320
+    ends = 1430
+
+    #0.8 good perf
+    DownSampling_constant = 0.16
+    #LATO1:
+    # starts = 150
+    # ends = 1950
+    #LATO2:
+    #starts = 2300
+    #ends = 4200
 
     print("analizing: S:", starts, " E:", ends, " TOT:", ends-starts)
     timestamp_sorted = []
@@ -927,6 +1071,15 @@ if 1:
         if idx > starts and idx < ends:
             pcd_raw = o3d.io.read_point_cloud(
                 os.path.join(coupled_saving_folder, file_name))  # Usa file_name invece di pointcloud_files[idx]
+
+            #eliminazione terreno
+            points = np.asarray(pcd_raw.points)
+            colors = np.asarray(pcd_raw.colors)
+            mask = points[:, 0] <= 1900
+            pcd_raw.points = o3d.utility.Vector3dVector(points[mask])
+            pcd_raw.colors = o3d.utility.Vector3dVector(colors[mask])
+
+
             pcd_raw = convert_to_meters(pcd_raw)
 
             pointclouds.append(pcd_raw)
@@ -942,16 +1095,20 @@ if 1:
         PLOT.plot_interpolated_data(interpolated_data)
         PLOT.plot_3d_trajectory_with_arrows(interpolated_data)
 
+    fused = icp_rgb_standard(pointclouds,timestamp_sorted)
 
+    sys.exit()
+    fused, trajectory_deltas = hierarchy_slam_icp(pointclouds,timestamp_sorted, downsampled_gnss_imu, DownSampling_constant)
+    # Crea timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    fused, trajectory_deltas = hierarchy_slam_icp(pointclouds,timestamp_sorted, downsampled_gnss_imu, voxel)
-    filename = "output_double/fused.ply"
+    # Crea filename con timestamp
+    filename = f"output_double/fused_{timestamp}.ply"
+
+    # Salva la point cloud
     o3d.io.write_point_cloud(filename, fused)
+
     print(f"PointCloud salvata come {filename}")
-
-
-
-
 
     # now coupled
     print("COUPLED TIMESTAMP")

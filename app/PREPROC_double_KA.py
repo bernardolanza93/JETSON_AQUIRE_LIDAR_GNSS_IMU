@@ -222,6 +222,6 @@ def inspect_mkv_file(file):
 
 
 
-mkv_file = "/home/mmt-ben/JETSON_AQUIRE_LIDAR_GNSS_IMU/app/slavemkv/20240716_113058_subordinate.mkv"
-inspect_mkv_file(mkv_file)
+mkv_file = "/home/mmt-ben/Downloads/20240716_113102_master.mkv"
+#inspect_mkv_file(mkv_file)
 

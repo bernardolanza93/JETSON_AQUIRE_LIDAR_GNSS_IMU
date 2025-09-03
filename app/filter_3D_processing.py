@@ -49,7 +49,7 @@ def remove_redundant_points(pointcloud, min_distance=0.001):
         filtered_pointcloud.colors = o3d.utility.Vector3dVector(filtered_colors)
 
     # Stampa informazioni
-    print(f"REDUNDANT Removed: {removed_count} ({removal_percentage:.2f}%)")
+    #print(f"REDUNDANT Removed: {removed_count} ({removal_percentage:.2f}%)")
 
     return filtered_pointcloud
 

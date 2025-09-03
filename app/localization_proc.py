@@ -18,6 +18,132 @@ from ahrs.filters import Madgwick
 from ahrs.common.orientation import q_rot
 import plotter as PLOT
 
+def generate_gnss_based_orientation_with_imu(gnss_data_processed, imu_timestamps, imu_euler_angles, position_window=5, orientation_window=5, visualize=True):
+    """
+    Generate orientation frames using IMU data and GNSS trajectory data with moving average filtering.
+
+    Parameters:
+        gnss_data_processed (dict): Processed GNSS data with timestamp keys and position values.
+       imu_timestamps (list): List of IMU timestamps.
+        imu_euler_angles (ndarray): Array of IMU Euler angles [roll, pitch, yaw] in degrees.
+        position_window (int): Window size for the moving average filter on positions.
+        orientation_window (int): Window size for the moving average filter on orientations.
+        visualize (bool): If True, plot the filtered positions and rotations.
+
+    Returns:
+        interpolated_data (dict): Dictionary with filtered timestamps as keys and associated rotation and position values.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Convert IMU Euler angles from degrees to radians
+
+    #imu_euler_angles = np.radians(imu_euler_angles)
+    imu_euler_angles = np.array(imu_euler_angles)
+
+
+    # Extract GNSS timestamps and positions from the processed data
+    gnss_timestamps = []
+    gnss_positions = []
+
+    for timestamp, data in gnss_data_processed.items():
+        gnss_timestamps.append(float(timestamp))
+        position = data['position']
+        gnss_positions.append([position['x'], position['y'], position['z']])
+
+    # Convert inputs to numpy arrays for easier processing
+    gnss_timestamps = np.array(gnss_timestamps)
+    gnss_positions = np.array(gnss_positions)
+
+    # Apply moving average filter to positions
+    filtered_positions = np.array([moving_average(gnss_positions[:, i], position_window) for i in range(3)]).T
+    filtered_timestamps = gnss_timestamps[position_window - 1 : -position_window + 1] if position_window > 1 else gnss_timestamps
+
+    # Interpolate IMU Euler angles onto GNSS timestamps
+    interp_roll = interp1d(imu_timestamps, imu_euler_angles[:, 0], fill_value="extrapolate")
+    interp_pitch = interp1d(imu_timestamps, imu_euler_angles[:, 1], fill_value="extrapolate")
+    interp_yaw = interp1d(imu_timestamps, imu_euler_angles[:, 2], fill_value="extrapolate")
+
+    interpolated_roll = interp_roll(filtered_timestamps)
+    interpolated_pitch = interp_pitch(filtered_timestamps)
+    interpolated_yaw = interp_yaw(filtered_timestamps)
+
+    # Apply moving average filter to rotations
+    filtered_roll = moving_average(interpolated_roll, orientation_window)
+    filtered_pitch = moving_average(interpolated_pitch, orientation_window)
+    filtered_yaw = moving_average(interpolated_yaw, orientation_window)
+
+    # Shift angles so that they all start from zero
+    filtered_roll -= filtered_roll[0]
+    filtered_pitch -= filtered_pitch[0]
+    filtered_yaw -= filtered_yaw[0]
+
+    invert_sign = {'roll': False, 'pitch': False, 'yaw': True}
+
+    if invert_sign['roll']:
+        filtered_roll = -filtered_roll
+    if invert_sign['pitch']:
+        filtered_pitch = -filtered_pitch
+    if invert_sign['yaw']:
+        filtered_yaw = -filtered_yaw
+
+    # Align timestamps and positions with the length of the filtered angles
+    min_length = min(len(filtered_roll), len(filtered_pitch), len(filtered_yaw), len(filtered_timestamps), len(filtered_positions))
+
+    final_timestamps = filtered_timestamps[:min_length]
+    final_positions = filtered_positions[:min_length]
+    filtered_roll = filtered_roll[:min_length]
+    filtered_pitch = filtered_pitch[:min_length]
+    filtered_yaw = filtered_yaw[:min_length]
+
+    # Visualization (if enabled)
+    if visualize:
+        plt.figure(figsize=(12, 8))
+
+        # Plot GNSS positions
+        plt.subplot(2, 1, 1)
+        plt.plot(final_timestamps, final_positions[:, 0], label="GNSS X (Translation)")
+        plt.plot(final_timestamps, final_positions[:, 1], label="GNSS Y (Translation)")
+        plt.plot(final_timestamps, final_positions[:, 2], label="GNSS Z (Translation)")
+        plt.title("Filtered GNSS Positions")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Translation (m)")
+        plt.legend()
+        plt.grid()
+
+        # Plot IMU Euler angles
+        plt.subplot(2, 1, 2)
+        plt.plot(final_timestamps, filtered_roll, label="IMU Roll (X)")
+        plt.plot(final_timestamps, filtered_pitch, label="IMU Pitch (Y)")
+        plt.plot(final_timestamps, filtered_yaw, label="IMU Yaw (Z)")
+        plt.title("Filtered IMU Rotations (in Radians)")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Rotation (rad)")
+        plt.legend()
+        plt.grid()
+
+        plt.tight_layout()
+        plt.show()
+
+    # Construct output dictionary
+    interpolated_data = {}
+    for i, timestamp in enumerate(final_timestamps):
+        interpolated_data[timestamp] = {
+            'rotation': {
+                'x': filtered_roll[i],
+                'y': filtered_pitch[i],
+                'z': filtered_yaw[i]
+            },
+            'position': {
+                'x': final_positions[i, 0],
+                'y': final_positions[i, 1],
+                'z': final_positions[i, 2]
+            }
+        }
+
+    return interpolated_data
+
+
 
 def moving_average(data, window_size):
     """
@@ -43,6 +169,9 @@ def generate_gnss_based_orientation(gnss_data_processed, position_window=5, orie
     Returns:
         interpolated_data (dict): Dictionary with filtered timestamps as keys and associated rotation and position values.
     """
+    import numpy as np
+    import matplotlib.pyplot as plt
+
     # Extract GNSS timestamps and positions from the processed data
     gnss_timestamps = []
     gnss_positions = []
@@ -60,20 +189,24 @@ def generate_gnss_based_orientation(gnss_data_processed, position_window=5, orie
     filtered_positions = np.array([moving_average(gnss_positions[:, i], position_window) for i in range(3)]).T
     filtered_timestamps = gnss_timestamps[position_window - 1 : -position_window + 1] if position_window > 1 else gnss_timestamps
 
-
-    # print(len(filtered_positions[:, 1]))
-    # print(len(filtered_timestamps))
-
-
     # Initialize lists for orientations
     roll_list, pitch_list, yaw_list = [], [], []
 
-    for i in range(1, len(filtered_positions)):
-        # Calcolo dell'asse x come vettore di spostamento
-        tangent_vector = filtered_positions[i] - filtered_positions[i - 1]
-        x_axis = tangent_vector / np.linalg.norm(tangent_vector)
+    motion_threshold = 0.1  # 1 mm
 
-        # Calcolo degli assi y e z come ortogonali a x
+    for i in range(1, len(filtered_positions)):
+        tangent_vector = filtered_positions[i] - filtered_positions[i - 1]
+        displacement_norm = np.linalg.norm(tangent_vector)
+
+        if displacement_norm < motion_threshold:
+            # Riusa l’ultima rotazione stimata se il mezzo è quasi fermo
+            roll_list.append(roll_list[-1] if roll_list else 0.0)
+            pitch_list.append(pitch_list[-1] if pitch_list else 0.0)
+            yaw_list.append(yaw_list[-1] if yaw_list else 0.0)
+            continue
+
+        x_axis = tangent_vector / displacement_norm
+
         y_axis = np.cross([0, 0, 1], x_axis)
         if np.linalg.norm(y_axis) < 1e-6:
             y_axis = np.cross([0, 1, 0], x_axis)
@@ -81,7 +214,6 @@ def generate_gnss_based_orientation(gnss_data_processed, position_window=5, orie
         z_axis = np.cross(x_axis, y_axis)
         z_axis /= np.linalg.norm(z_axis)
 
-        # Calcolo degli angoli
         pitch = np.arcsin(-x_axis[2])
         roll = np.arctan2(z_axis[1], z_axis[2])
         yaw = np.arctan2(y_axis[0], x_axis[0])
@@ -94,15 +226,12 @@ def generate_gnss_based_orientation(gnss_data_processed, position_window=5, orie
     pitch_list = np.unwrap(pitch_list)
     yaw_list = np.unwrap(yaw_list)
 
-
-
-
-
-
     # Filtra le rotazioni e regola la lunghezza dei timestamp
     filtered_roll = moving_average(roll_list, orientation_window)
     filtered_pitch = moving_average(pitch_list, orientation_window)
     filtered_yaw = moving_average(yaw_list, orientation_window)
+
+
 
     # Allinea i timestamp e le posizioni con la lunghezza degli angoli filtrati
     min_length = min(len(filtered_roll), len(filtered_pitch), len(filtered_yaw), len(filtered_timestamps), len(filtered_positions))
@@ -113,8 +242,18 @@ def generate_gnss_based_orientation(gnss_data_processed, position_window=5, orie
     filtered_pitch = filtered_pitch[:min_length]
     filtered_yaw = filtered_yaw[:min_length]
 
-
-
+    # Plot delle rotazioni
+    plt.figure(figsize=(12, 6))
+    plt.plot(final_timestamps, filtered_roll, label="Roll (X)")
+    plt.plot(final_timestamps, filtered_pitch, label="Pitch (Y)")
+    plt.plot(final_timestamps, filtered_yaw, label="Yaw (Z)")
+    plt.title("Filtered Orientation from GNSS Trajectory")
+    plt.xlabel("Timestamp")
+    plt.ylabel("Rotation (rad)")
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.show()
 
     # Costruzione del dizionario di output con i dati filtrati
     interpolated_data = {}
@@ -262,9 +401,9 @@ def resample_data_to_slam_frequency(slam_timestamps, interpolated_data):
         resampled_data[t]['position']['y'] -= first_position[1]
         resampled_data[t]['position']['z'] -= first_position[2]
         #non devo anullare le rotazioni se no il sistema pensa di muoversi qsempre dritto anche quando non è così. ( es parto da quando sono in curva o da quando torno indietro
-        resampled_data[t]['rotation']['x'] -= first_rotation[0]
-        resampled_data[t]['rotation']['y'] -= first_rotation[1]
-        resampled_data[t]['rotation']['z'] -= first_rotation[2]
+        # resampled_data[t]['rotation']['x'] -= first_rotation[0]
+        # resampled_data[t]['rotation']['y'] -= first_rotation[1]
+        # resampled_data[t]['rotation']['z'] -= first_rotation[2]
 
     return resampled_data
 
@@ -882,7 +1021,7 @@ def scykit_process_imu(file_path):
 
 
 
-def process_imu_data(file_path, euler_order='xyz', degrees = True):
+def process_imu_data(file_path, euler_order='xyz', degrees = False):
 
 
 
@@ -994,6 +1133,8 @@ def process_imu_data(file_path, euler_order='xyz', degrees = True):
     # Converti le liste in array NumPy
     raw_accelerations = np.array(raw_accelerations_nog)
     raw_rotations = np.array(raw_rotations)
+    # Rimuove discontinuità angolari (wrap-around su ±π)
+    unwrapped_rotations = np.unwrap(raw_rotations, axis=0)
     raw_timestamps = np.array(raw_timestamps)
     angular_velocities = np.array(angular_velocities)
     quaternions = np.array(quaternions)
@@ -1007,10 +1148,9 @@ def process_imu_data(file_path, euler_order='xyz', degrees = True):
     for i in range(raw_accelerations.shape[1]):
         filtered_accelerations[:, i] = moving_average(raw_accelerations[:, i], window_size)
 
-    # Filtrare le accelerazioni lineari con una finestra mobile
-    filtered_rotations = np.zeros((raw_rotations.shape[0] - window_size + 1, raw_rotations.shape[1]))
-    for i in range(raw_rotations.shape[1]):
-        filtered_rotations[:, i] = moving_average(raw_rotations[:, i], window_size)
+    filtered_rotations = np.zeros((unwrapped_rotations.shape[0] - window_size + 1, unwrapped_rotations.shape[1]))
+    for i in range(unwrapped_rotations.shape[1]):
+        filtered_rotations[:, i] = moving_average(unwrapped_rotations[:, i], window_size)
 
 
 
@@ -1139,8 +1279,6 @@ def process_imu_data(file_path, euler_order='xyz', degrees = True):
 
     velocities = np.array(local_velocities)
     angles_deg = np.degrees(np.arctan2(velocities[:, 1], velocities[:, 0]))
-
-
 
 
 
